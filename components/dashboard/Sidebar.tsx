@@ -1,17 +1,22 @@
+import Link from "next/link";
+
 import type { MenuSection } from "@/components/dashboard/types";
 
 type SidebarProps = {
+  currentPath?: string;
   menuSections: MenuSection[];
 };
 
-export function Sidebar({ menuSections }: SidebarProps) {
+export function Sidebar({ currentPath, menuSections }: SidebarProps) {
   return (
     <aside className="hidden w-72 shrink-0 border-r border-slate-200 bg-white lg:flex lg:flex-col">
       <div className="border-b border-slate-200 px-6 py-6">
         <div className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-600">
           LOGÍSTICA DE DATOS
         </div>
-        <h1 className="mt-2 text-2xl font-bold text-slate-900">Auditor AI</h1>
+        <Link href="/" className="mt-2 block text-2xl font-bold text-slate-900">
+          Auditor AI
+        </Link>
         <p className="mt-2 text-sm text-slate-500">
           Plataforma de auditoría documental y cumplimiento asistido por IA.
         </p>
@@ -23,11 +28,21 @@ export function Sidebar({ menuSections }: SidebarProps) {
             <h2 className="text-sm font-semibold text-slate-900">{section.title}</h2>
             <ul className="mt-3 space-y-2 text-sm text-slate-600">
               {section.items.map((item) => (
-                <li
-                  key={item}
-                  className="rounded-xl px-3 py-2 transition hover:bg-white hover:text-slate-900"
-                >
-                  {item}
+                <li key={`${section.title}-${item.label}`}>
+                  {item.href ? (
+                    <Link
+                      href={item.href}
+                      className={`block rounded-xl px-3 py-2 transition hover:bg-white hover:text-slate-900 ${
+                        currentPath === item.href ? "bg-white font-medium text-slate-900 shadow-sm" : ""
+                      }`}
+                    >
+                      {item.label}
+                    </Link>
+                  ) : (
+                    <div className="rounded-xl px-3 py-2 transition hover:bg-white hover:text-slate-900">
+                      {item.label}
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>

@@ -16,7 +16,16 @@ export function ModulesOverview({ modules }: ModulesOverviewProps) {
         {modules.map((card) => (
           <div key={card.title} className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
             <h4 className="font-semibold text-slate-900">{card.title}</h4>
-            <p className="mt-2 text-sm leading-6 text-slate-600">{card.desc}</p>
+            {card.desc ? <p className="mt-2 text-sm leading-6 text-slate-600">{card.desc}</p> : null}
+            {card.items ? (
+              <div className="mt-3 space-y-3">
+                {card.items.map((item) => (
+                  <div key={item.label} className="text-sm leading-6 text-slate-600">
+                    <span className="font-semibold text-slate-900">{item.label}:</span> {item.description}
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
         ))}
       </div>

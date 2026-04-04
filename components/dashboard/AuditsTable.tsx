@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { statusClasses } from "@/components/dashboard/data";
 import type { Audit } from "@/components/dashboard/types";
 
@@ -34,7 +36,11 @@ export function AuditsTable({ audits }: AuditsTableProps) {
           <tbody>
             {audits.map((audit) => (
               <tr key={audit.doc} className="border-b border-slate-100 align-top last:border-b-0">
-                <td className="py-4 pr-4 font-medium text-slate-900">{audit.doc}</td>
+                <td className="py-4 pr-4 font-medium text-slate-900">
+                  <Link href={`/auditorias/${audit.id}`} className="transition hover:text-emerald-700">
+                    {audit.doc}
+                  </Link>
+                </td>
                 <td className="py-4 pr-4 text-slate-600">{audit.risk}</td>
                 <td className="py-4 pr-4 text-slate-900">{audit.score}</td>
                 <td className="py-4 pr-4">
