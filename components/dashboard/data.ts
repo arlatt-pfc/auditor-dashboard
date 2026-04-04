@@ -29,13 +29,22 @@ export const menuSections: MenuSection[] = [
     ],
   },
   {
-    title: "Normas de Empresas Contratistas",
+    title: "Empresas-Cliente",
     items: [
       { label: "PEMEX" },
       { label: "Mexichem" },
       { label: "Políticas internas" },
       { label: "Anexos SSPA" },
       { label: "Requisitos por cliente" },
+    ],
+  },
+  {
+    title: "Documentación Contratista",
+    items: [
+      { label: "Carga de documentos", href: "/dashboard/documentacion-contratista/carga" },
+      { label: "Expedientes", href: "#" },
+      { label: "Evidencias", href: "#" },
+      { label: "Historial documental", href: "#" },
     ],
   },
   {
