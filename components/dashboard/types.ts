@@ -1,4 +1,5 @@
 export type MenuItem = {
+  description?: string;
   label: string;
   href?: string;
 };

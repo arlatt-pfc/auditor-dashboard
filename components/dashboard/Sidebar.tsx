@@ -36,11 +36,17 @@ export function Sidebar({ currentPath, menuSections }: SidebarProps) {
                         currentPath === item.href ? "bg-white font-medium text-slate-900 shadow-sm" : ""
                       }`}
                     >
-                      {item.label}
+                      <span>{item.label}</span>
+                      {item.description ? (
+                        <span className="mt-1 block text-xs leading-5 text-slate-400">{item.description}</span>
+                      ) : null}
                     </Link>
                   ) : (
                     <div className="rounded-xl px-3 py-2 transition hover:bg-white hover:text-slate-900">
-                      {item.label}
+                      <span>{item.label}</span>
+                      {item.description ? (
+                        <span className="mt-1 block text-xs leading-5 text-slate-400">{item.description}</span>
+                      ) : null}
                     </div>
                   )}
                 </li>

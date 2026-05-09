@@ -51,6 +51,11 @@ export const menuSections: MenuSection[] = [
     title: "Módulo de Auditoría",
     items: [
       { label: "Nueva auditoría", href: "/nueva-auditoria" },
+      {
+        label: "Customs Compliance",
+        href: "/dashboard/customs-compliance",
+        description: "Auditoría de comercio exterior",
+      },
       { label: "Matriz de cumplimiento" },
       { label: "Reportes PDF" },
       { label: "CSV / Exportaciones" },

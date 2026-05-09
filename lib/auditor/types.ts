@@ -1,3 +1,5 @@
+export type AuditFramework = "STPS" | "PEMEX" | "CUSTOMS_COMPLIANCE";
+
 export type AuditUploadResponse =
   | {
       ok: true;
