@@ -9,6 +9,7 @@ import { CustomsOperationsTable } from "@/components/dashboard/customs/CustomsOp
 import { CustomsUploadForm } from "@/components/dashboard/customs/CustomsUploadForm";
 import { Header } from "@/components/dashboard/Header";
 import { PageShell } from "@/components/dashboard/PageShell";
+import { getAuthContext, userCanCreateEngine, userCanExecuteEngine, userCanReadEngine } from "@/lib/auth/session";
 import { getCustomsFindings, getCustomsOperations } from "@/lib/customs/supabase";
 import type { CustomsOperation } from "@/lib/customs/types";
 import type { Stat } from "@/components/dashboard/types";
@@ -18,13 +19,33 @@ const currentPath = "/dashboard/customs-compliance";
 export default async function CustomsCompliancePage() {
   await connection();
 
-  const supabaseOperations = await getCustomsOperations();
+  const auth = await getAuthContext();
+  const canReadCustoms = userCanReadEngine(auth, "CUSTOMS_COMPLIANCE");
+  const canManageCustoms = userCanCreateEngine(auth, "CUSTOMS_COMPLIANCE") && userCanExecuteEngine(auth, "CUSTOMS_COMPLIANCE");
+
+  if (!canReadCustoms) {
+    return (
+      <PageShell currentPath={currentPath}>
+        <Header
+          eyebrow="CUSTOMS_COMPLIANCE"
+          title="Acceso restringido"
+          description="Tu usuario no tiene acceso asignado al motor CUSTOMS_COMPLIANCE para esta empresa."
+        />
+      </PageShell>
+    );
+  }
+
+  const supabaseOperations = await getCustomsOperations({
+    accessToken: auth?.accessToken,
+  });
   const usesMockData = supabaseOperations.length === 0;
   const operations = usesMockData ? [customsOperationMock] : supabaseOperations;
   const selectedOperation = operations[0] ?? customsOperationMock;
   const supabaseFindings = usesMockData
     ? customsOperationMock.findings
-    : await getCustomsFindings(selectedOperation.operationRecordId ?? selectedOperation.operationId);
+    : await getCustomsFindings(selectedOperation.operationRecordId ?? selectedOperation.operationId, {
+        accessToken: auth?.accessToken,
+      });
   const selectedFindings = supabaseFindings.length > 0 ? supabaseFindings : selectedOperation.findings;
   const operation = {
     ...selectedOperation,
@@ -68,7 +89,7 @@ export default async function CustomsCompliancePage() {
             </section>
 
             <CustomsOperationsTable operations={operations} selectedOperationId={operation.operationId} />
-            <CustomsUploadForm operation={operation} />
+            <CustomsUploadForm canManage={canManageCustoms} operation={operation} />
             <CustomsFindingsTable findings={operation.findings} />
           </div>
 

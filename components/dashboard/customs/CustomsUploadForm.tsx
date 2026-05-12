@@ -5,18 +5,19 @@ import { useState } from "react";
 import type { CustomsOperation, CustomsOperationDocument } from "@/lib/customs/types";
 
 type CustomsUploadFormProps = {
+  canManage?: boolean;
   operation: CustomsOperation;
 };
 
 type SelectedFiles = Partial<Record<CustomsOperationDocument["documentType"], string>>;
 
-export function CustomsUploadForm({ operation }: CustomsUploadFormProps) {
+export function CustomsUploadForm({ canManage = true, operation }: CustomsUploadFormProps) {
   const [selectedFiles, setSelectedFiles] = useState<SelectedFiles>({});
   const [auditState, setAuditState] = useState<"idle" | "ready" | "completed">("idle");
 
   const requiredDocuments = operation.documents.filter((document) => document.required);
   const selectedRequiredCount = requiredDocuments.filter((document) => selectedFiles[document.documentType]).length;
-  const canExecute = selectedRequiredCount === requiredDocuments.length;
+  const hasRequiredDocuments = selectedRequiredCount === requiredDocuments.length;
 
   function handleFileChange(documentType: CustomsOperationDocument["documentType"], file?: File) {
     setSelectedFiles((current) => ({
@@ -63,6 +64,7 @@ export function CustomsUploadForm({ operation }: CustomsUploadFormProps) {
             <input
               accept={document.documentType === "cfdi_xml" ? "application/xml,text/xml,.xml" : "application/pdf,.pdf"}
               className="mt-4 block w-full text-sm text-slate-600 file:mr-4 file:rounded-xl file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-slate-800"
+              disabled={!canManage}
               onChange={(event) => handleFileChange(document.documentType, event.target.files?.[0])}
               type="file"
             />
@@ -76,11 +78,11 @@ export function CustomsUploadForm({ operation }: CustomsUploadFormProps) {
       <div className="mt-6 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-sm font-medium text-slate-900">Expediente aduanal {operation.operationId}</p>
-          <p className="mt-1 text-sm text-slate-500">{getStatusMessage(auditState, canExecute)}</p>
+          <p className="mt-1 text-sm text-slate-500">{getStatusMessage(auditState, hasRequiredDocuments, canManage)}</p>
         </div>
         <button
           className="inline-flex items-center justify-center rounded-2xl bg-slate-900 px-5 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-          disabled={!canExecute}
+          disabled={!hasRequiredDocuments || !canManage}
           onClick={() => setAuditState("completed")}
           type="button"
         >
@@ -91,12 +93,16 @@ export function CustomsUploadForm({ operation }: CustomsUploadFormProps) {
   );
 }
 
-function getStatusMessage(auditState: "idle" | "ready" | "completed", canExecute: boolean) {
+function getStatusMessage(auditState: "idle" | "ready" | "completed", hasRequiredDocuments: boolean, canManage: boolean) {
+  if (!canManage) {
+    return "Tu rol permite consultar este expediente, pero no cargar documentos ni ejecutar auditorias.";
+  }
+
   if (auditState === "completed") {
     return "Auditoria integral simulada completada. Los hallazgos del expediente se muestran abajo.";
   }
 
-  if (canExecute) {
+  if (hasRequiredDocuments) {
     return "Expediente documental completo. Listo para ejecutar auditoria integral.";
   }
 

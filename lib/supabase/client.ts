@@ -1,6 +1,7 @@
 type Primitive = boolean | number | string;
 
 type QueryOptions = {
+  accessToken?: string;
   eq?: Record<string, Primitive>;
   limit?: number;
   order?: {
@@ -12,6 +13,7 @@ type QueryOptions = {
 };
 
 type InsertOptions = {
+  accessToken?: string;
   select?: string;
 };
 
@@ -43,6 +45,7 @@ export async function supabaseSelect<T>(table: string, options: QueryOptions = {
 
 export async function supabaseInsert<T>(table: string, payload: Record<string, unknown>, options: InsertOptions = {}): Promise<T | null> {
   const request = buildSupabaseRequest(table, {
+    accessToken: options.accessToken,
     select: options.select ?? "*",
   });
 
@@ -98,7 +101,7 @@ function buildSupabaseRequest(table: string, options: QueryOptions) {
   return {
     headers: {
       apikey: SUPABASE_ANON_KEY,
-      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      Authorization: `Bearer ${options.accessToken ?? SUPABASE_ANON_KEY}`,
     },
     url,
   };

@@ -27,14 +27,21 @@ const documentLabels: Record<CustomsDocumentType, string> = {
   pedimento: "Pedimento",
 };
 
-export async function getCustomsOperations() {
-  const rows = await supabaseSelect<CustomsRow>("customs_operations");
+type CustomsQueryOptions = {
+  accessToken?: string;
+};
+
+export async function getCustomsOperations(options: CustomsQueryOptions = {}) {
+  const rows = await supabaseSelect<CustomsRow>("customs_operations", {
+    accessToken: options.accessToken,
+  });
 
   return rows.map(mapOperation);
 }
 
-export async function getCustomsOperationById(id: string) {
+export async function getCustomsOperationById(id: string, options: CustomsQueryOptions = {}) {
   const rows = await supabaseSelect<CustomsRow>("customs_operations", {
+    accessToken: options.accessToken,
     limit: 1,
     params: {
       or: `(id.eq.${id},operation_id.eq.${id},operation_code.eq.${id})`,
@@ -44,8 +51,9 @@ export async function getCustomsOperationById(id: string) {
   return rows[0] ? mapOperation(rows[0]) : null;
 }
 
-export async function getCustomsFindings(operationId: string) {
+export async function getCustomsFindings(operationId: string, options: CustomsQueryOptions = {}) {
   const rows = await supabaseSelect<CustomsRow>("customs_findings", {
+    accessToken: options.accessToken,
     eq: {
       operation_id: operationId,
     },
@@ -54,13 +62,17 @@ export async function getCustomsFindings(operationId: string) {
   return rows.map(mapFinding);
 }
 
-export async function createCustomsOperation(payload: CreateCustomsOperationPayload) {
-  const row = await supabaseInsert<CustomsRow>("customs_operations", payload);
+export async function createCustomsOperation(payload: CreateCustomsOperationPayload, options: CustomsQueryOptions = {}) {
+  const row = await supabaseInsert<CustomsRow>("customs_operations", payload, {
+    accessToken: options.accessToken,
+  });
   return row ? mapOperation(row) : null;
 }
 
-export async function createCustomsDocument(payload: CreateCustomsDocumentPayload) {
-  return supabaseInsert<CustomsRow>("customs_documents", payload);
+export async function createCustomsDocument(payload: CreateCustomsDocumentPayload, options: CustomsQueryOptions = {}) {
+  return supabaseInsert<CustomsRow>("customs_documents", payload, {
+    accessToken: options.accessToken,
+  });
 }
 
 function mapOperation(row: CustomsRow): CustomsOperation {

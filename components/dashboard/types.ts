@@ -1,5 +1,6 @@
 export type MenuItem = {
   description?: string;
+  engine?: AuditEngineCode;
   label: string;
   href?: string;
 };
@@ -73,3 +74,7 @@ export type ModuleCard = {
     description: string;
   }[];
 };
+
+export type AuditEngineCode = "CUSTOMS_COMPLIANCE" | "STPS_PEMEX_COMPLIANCE" | "CONTRACTOR_COMPLIANCE";
+
+export type UserRole = "admin" | "auditor" | "lector";

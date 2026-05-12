@@ -55,6 +55,7 @@ export const menuSections: MenuSection[] = [
         label: "Customs Compliance",
         href: "/dashboard/customs-compliance",
         description: "Auditoría de comercio exterior",
+        engine: "CUSTOMS_COMPLIANCE",
       },
       { label: "Matriz de cumplimiento" },
       { label: "Reportes PDF" },
