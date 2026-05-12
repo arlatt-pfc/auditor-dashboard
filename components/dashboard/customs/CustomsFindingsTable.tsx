@@ -19,7 +19,7 @@ export function CustomsFindingsTable({ findings }: CustomsFindingsTableProps) {
         <div>
           <h3 className="text-xl font-semibold text-slate-900">Tabla de hallazgos</h3>
           <p className="mt-1 text-sm text-slate-500">
-            Reglas aduaneras simuladas para validar el caso de negocio del modulo.
+            Hallazgos derivados de la revision integral del expediente aduanal.
           </p>
         </div>
         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">

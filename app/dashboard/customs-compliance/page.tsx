@@ -22,7 +22,9 @@ export default async function CustomsCompliancePage() {
   const usesMockData = supabaseOperations.length === 0;
   const operations = usesMockData ? [customsOperationMock] : supabaseOperations;
   const selectedOperation = operations[0] ?? customsOperationMock;
-  const supabaseFindings = usesMockData ? customsOperationMock.findings : await getCustomsFindings(selectedOperation.operationId);
+  const supabaseFindings = usesMockData
+    ? customsOperationMock.findings
+    : await getCustomsFindings(selectedOperation.operationRecordId ?? selectedOperation.operationId);
   const selectedFindings = supabaseFindings.length > 0 ? supabaseFindings : selectedOperation.findings;
   const operation = {
     ...selectedOperation,
@@ -35,7 +37,7 @@ export default async function CustomsCompliancePage() {
       <Header
         eyebrow="CUSTOMS_COMPLIANCE"
         title="Customs Compliance"
-        description="Auditoría inteligente de operaciones de importación para identificar sobrepagos, cargos indebidos y recuperación potencial."
+        description="Auditoría inteligente de expedientes aduanales de importación para identificar sobrepagos, cargos indebidos y recuperación potencial."
         actions={
           <>
             <Link
@@ -58,9 +60,9 @@ export default async function CustomsCompliancePage() {
           <div className="space-y-6">
             <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <OperationMetric label="Operation ID" value={operation.operationId} />
+                <OperationMetric label="Expediente Aduanal" value={operation.operationId} />
                 <OperationMetric label="Pedimento" value={operation.pedimento} />
-                <OperationMetric label="Factura" value={operation.commercialInvoice} />
+                <OperationMetric label="Referencia Aduanal" value={operation.customsReference || "Sin referencia"} />
                 <OperationMetric label="Recuperacion" value={formatCurrency(operation.metrics.potentialRecovery)} />
               </div>
             </section>

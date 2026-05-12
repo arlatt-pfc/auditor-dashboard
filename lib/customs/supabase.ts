@@ -14,10 +14,16 @@ import type {
 type CustomsRow = Record<string, unknown>;
 
 const documentLabels: Record<CustomsDocumentType, string> = {
+  annex: "Anexos",
+  bill_of_lading: "Bill of Lading",
   broker_expense_account: "Cuenta de Gastos",
   broker_sla: "SLA del Agente Aduanal",
   certificate_of_origin: "Certificado de Origen T-MEC",
+  cfdi_pdf: "CFDI PDF",
+  cfdi_xml: "CFDI XML",
   commercial_invoice: "Factura Comercial",
+  cove: "COVE",
+  data_sheet: "Hoja de Datos",
   pedimento: "Pedimento",
 };
 
@@ -31,7 +37,7 @@ export async function getCustomsOperationById(id: string) {
   const rows = await supabaseSelect<CustomsRow>("customs_operations", {
     limit: 1,
     params: {
-      or: `(id.eq.${id},operation_id.eq.${id})`,
+      or: `(id.eq.${id},operation_id.eq.${id},operation_code.eq.${id})`,
     },
   });
 
@@ -58,7 +64,8 @@ export async function createCustomsDocument(payload: CreateCustomsDocumentPayloa
 }
 
 function mapOperation(row: CustomsRow): CustomsOperation {
-  const operationId = text(row.operation_id, row.operationId, row.id, "CUSTOMS-SUPABASE");
+  const operationId = text(row.operation_code, row.operationCode, row.operation_id, row.operationId, row.id, "CUSTOMS-SUPABASE");
+  const operationRecordId = text(row.id, row.operation_id, row.operationId, operationId);
   const metrics = mapMetrics(row);
   const pedimento = text(row.pedimento, row.pedimento_number, row.pedimentoNumber, "Sin pedimento");
   const commercialInvoice = text(row.commercial_invoice, row.commercialInvoice, row.invoice_number, row.invoiceNumber, "Sin factura");
@@ -70,11 +77,12 @@ function mapOperation(row: CustomsRow): CustomsOperation {
     brokerExpenseAccount,
     certificateOfOrigin,
     commercialInvoice,
+    customsReference: text(row.customs_reference, row.customsReference, row.reference, row.referencia, ""),
     dictamen: text(
       row.dictamen,
       row.executive_summary,
       row.summary,
-      `Operacion ${operationId} cargada desde Supabase para revision de cumplimiento aduanero.`,
+      `Expediente aduanal ${operationId} cargado desde Supabase para revision de cumplimiento aduanero.`,
     ),
     documents: mapDocuments(row),
     findings: arrayFrom(row.findings).map((finding) => mapFinding(asRow(finding))),
@@ -82,11 +90,12 @@ function mapOperation(row: CustomsRow): CustomsOperation {
     importer: text(row.importer, row.importer_name, row.importerName, "Sin importador"),
     metrics,
     nextSteps: stringArray(row.next_steps, row.nextSteps, [
-      "Registrar paquete documental de la operacion.",
+      "Registrar todos los documentos que integran el expediente aduanal.",
       "Validar hallazgos contra evidencia fuente.",
       "Preparar acciones de recuperacion o rectificacion.",
     ]),
     operationId,
+    operationRecordId,
     pedimento,
     provider: text(row.provider, row.supplier, row.supplier_name, row.provider_name, "Sin proveedor"),
     recommendations: stringArray(row.recommendations, row.recomendaciones, [
@@ -126,12 +135,12 @@ function mapDocuments(row: CustomsRow): CustomsOperationDocument[] {
     return documents.map((document, index) => mapDocument(asRow(document), index));
   }
 
-  return ["pedimento", "commercial_invoice", "certificate_of_origin", "broker_expense_account", "broker_sla"].map((documentType, index) =>
+  return ["pedimento", "commercial_invoice", "bill_of_lading", "broker_expense_account", "cfdi_pdf", "cfdi_xml", "data_sheet", "certificate_of_origin", "annex", "cove"].map((documentType, index) =>
     mapDocument(
       {
         document_type: documentType,
         filename: "",
-        required: documentType !== "broker_sla",
+        required: documentType !== "certificate_of_origin" && documentType !== "annex" && documentType !== "cove",
       },
       index,
     ),
@@ -146,8 +155,8 @@ function mapDocument(row: CustomsRow, index: number): CustomsOperationDocument {
     filename: text(row.filename, row.file_name, row.fileName, "Pendiente"),
     id: text(row.id, row.document_id, row.documentId, `${documentType}-${index}`),
     label: text(row.label, documentLabels[documentType]),
-    required: boolean(row.required, documentType !== "broker_sla"),
-    status: boolean(row.required, documentType !== "broker_sla") ? "Pending" : "Optional",
+    required: boolean(row.required, documentType !== "broker_sla" && documentType !== "certificate_of_origin" && documentType !== "annex" && documentType !== "cove"),
+    status: boolean(row.required, documentType !== "broker_sla" && documentType !== "certificate_of_origin" && documentType !== "annex" && documentType !== "cove") ? "Pending" : "Optional",
   };
 }
 
@@ -295,10 +304,16 @@ function documentTypeValue(...values: unknown[]): CustomsDocumentType {
   for (const value of values) {
     if (
       value === "pedimento" ||
+      value === "bill_of_lading" ||
       value === "commercial_invoice" ||
       value === "certificate_of_origin" ||
       value === "broker_expense_account" ||
-      value === "broker_sla"
+      value === "broker_sla" ||
+      value === "cfdi_pdf" ||
+      value === "cfdi_xml" ||
+      value === "data_sheet" ||
+      value === "annex" ||
+      value === "cove"
     ) {
       return value;
     }

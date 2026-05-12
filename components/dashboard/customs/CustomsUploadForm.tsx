@@ -30,14 +30,22 @@ export function CustomsUploadForm({ operation }: CustomsUploadFormProps) {
     <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h3 className="text-xl font-semibold text-slate-900">Carga documental 1:1</h3>
+          <h3 className="text-xl font-semibold text-slate-900">Carga del expediente aduanal</h3>
           <p className="mt-1 text-sm text-slate-500">
-            Simula el paquete documental de importacion que despues se enviara al pipeline del VPS.
+            Cargue todos los documentos que integran el expediente aduanal para ejecutar la auditoria integral.
           </p>
         </div>
         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
           {selectedRequiredCount}/{requiredDocuments.length} obligatorios
         </span>
+      </div>
+
+      <div className="mt-6 grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2 xl:grid-cols-5">
+        <ExpedientField label="Código de Expediente" value={operation.operationId} />
+        <ExpedientField label="Número de Pedimento" value={operation.pedimento} />
+        <ExpedientField label="Referencia Aduanal" value={operation.customsReference || "Sin referencia"} />
+        <ExpedientField label="Importador" value={operation.importer} />
+        <ExpedientField label="Agente Aduanal" value={operation.broker} />
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
@@ -49,11 +57,11 @@ export function CustomsUploadForm({ operation }: CustomsUploadFormProps) {
             <span className="flex items-center justify-between gap-3">
               <span className="text-sm font-medium text-slate-800">{document.label}</span>
               <span className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-600 shadow-sm">
-                {document.required ? "PDF requerido" : "Opcional"}
+                {document.required ? "Requerido" : "Opcional"}
               </span>
             </span>
             <input
-              accept="application/pdf,.pdf"
+              accept={document.documentType === "cfdi_xml" ? "application/xml,text/xml,.xml" : "application/pdf,.pdf"}
               className="mt-4 block w-full text-sm text-slate-600 file:mr-4 file:rounded-xl file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-slate-800"
               onChange={(event) => handleFileChange(document.documentType, event.target.files?.[0])}
               type="file"
@@ -67,7 +75,7 @@ export function CustomsUploadForm({ operation }: CustomsUploadFormProps) {
 
       <div className="mt-6 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-sm font-medium text-slate-900">Operacion {operation.operationId}</p>
+          <p className="text-sm font-medium text-slate-900">Expediente aduanal {operation.operationId}</p>
           <p className="mt-1 text-sm text-slate-500">{getStatusMessage(auditState, canExecute)}</p>
         </div>
         <button
@@ -85,12 +93,21 @@ export function CustomsUploadForm({ operation }: CustomsUploadFormProps) {
 
 function getStatusMessage(auditState: "idle" | "ready" | "completed", canExecute: boolean) {
   if (auditState === "completed") {
-    return "Auditoria simulada completada con datos mock. Los hallazgos se muestran abajo.";
+    return "Auditoria integral simulada completada. Los hallazgos del expediente se muestran abajo.";
   }
 
   if (canExecute) {
-    return "Paquete documental completo. Listo para ejecutar auditoria simulada.";
+    return "Expediente documental completo. Listo para ejecutar auditoria integral.";
   }
 
-  return "Carga los cuatro PDFs obligatorios para habilitar la auditoria.";
+  return "Carga todos los documentos obligatorios del expediente para habilitar la auditoria.";
+}
+
+function ExpedientField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{label}</p>
+      <p className="mt-2 break-words text-sm font-semibold text-slate-900">{value}</p>
+    </div>
+  );
 }

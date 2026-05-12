@@ -2,10 +2,16 @@ import type { AuditFramework } from "@/lib/auditor/types";
 
 export type CustomsDocumentType =
   | "pedimento"
+  | "bill_of_lading"
   | "commercial_invoice"
   | "certificate_of_origin"
   | "broker_expense_account"
-  | "broker_sla";
+  | "broker_sla"
+  | "cfdi_pdf"
+  | "cfdi_xml"
+  | "data_sheet"
+  | "annex"
+  | "cove";
 
 export type CustomsSeverity = "Critical" | "High" | "Medium" | "Low";
 
@@ -42,11 +48,16 @@ export type CustomsOperationDocument = {
   status: "Mock loaded" | "Optional" | "Pending";
 };
 
+/**
+ * CustomsOperation represents the full customs operation file, not only the
+ * pedimento. The pedimento remains one document/attribute inside the file.
+ */
 export type CustomsOperation = {
   broker: string;
   brokerExpenseAccount: string;
   certificateOfOrigin: string;
   commercialInvoice: string;
+  customsReference: string;
   dictamen: string;
   documents: CustomsOperationDocument[];
   findings: CustomsFinding[];
@@ -55,6 +66,7 @@ export type CustomsOperation = {
   metrics: CustomsMetrics;
   nextSteps: string[];
   operationId: string;
+  operationRecordId?: string;
   pedimento: string;
   provider: string;
   recommendations: string[];

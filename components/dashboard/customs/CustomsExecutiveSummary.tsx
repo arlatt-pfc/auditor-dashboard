@@ -12,7 +12,9 @@ export function CustomsExecutiveSummary({ operation }: CustomsExecutiveSummaryPr
         <div className="flex items-start justify-between gap-3">
           <div>
             <h3 className="text-xl font-semibold text-slate-900">Dictamen Ejecutivo</h3>
-            <p className="mt-1 text-sm text-slate-500">{operation.pedimento}</p>
+            <p className="mt-1 text-sm text-slate-500">
+              Expediente auditado {operation.operationId} - Pedimento {operation.pedimento}
+            </p>
           </div>
           <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
             Risk {operation.metrics.riskScore}
@@ -21,10 +23,13 @@ export function CustomsExecutiveSummary({ operation }: CustomsExecutiveSummaryPr
         <p className="mt-5 text-sm leading-7 text-slate-600">{operation.dictamen}</p>
 
         <div className="mt-5 grid gap-3">
+          <SummaryRow label="Expediente Aduanal" value={operation.operationId} />
+          <SummaryRow label="Referencia Aduanal" value={operation.customsReference || "Sin referencia"} />
           <SummaryRow label="Importador" value={operation.importer} />
           <SummaryRow label="Proveedor" value={operation.provider} />
           <SummaryRow label="Agente Aduanal" value={operation.broker} />
-          <SummaryRow label="Cuenta de Gastos" value={formatCurrency(operation.metrics.brokerAccountTotal)} />
+          <SummaryRow label="Contribuciones" value={formatCurrency(operation.metrics.igiPaid)} />
+          <SummaryRow label="Cuenta de Gastos" value={operation.brokerExpenseAccount || formatCurrency(operation.metrics.brokerAccountTotal)} />
         </div>
       </section>
 
