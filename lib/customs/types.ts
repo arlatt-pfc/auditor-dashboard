@@ -59,3 +59,7 @@ export type CustomsOperation = {
   provider: string;
   recommendations: string[];
 };
+
+export type CreateCustomsOperationPayload = Record<string, unknown>;
+
+export type CreateCustomsDocumentPayload = Record<string, unknown>;
