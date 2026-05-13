@@ -20,12 +20,15 @@ type PedimentoXmlData = {
   pedimento_full: string;
   pedimento_number: string;
   prv_mxn: number | null;
+  coves: string[];
+  invoices: string[];
+  providers: string[];
   reference: string;
   tariff_items: string[];
   total_contributions_mxn: number | null;
 };
 
-const fieldAliases: Record<keyof Omit<PedimentoXmlData, "operation_code" | "tariff_items">, string[]> = {
+const fieldAliases: Record<keyof Omit<PedimentoXmlData, "operation_code" | "tariff_items" | "coves" | "invoices" | "providers">, string[]> = {
   broker_name: ["broker_name", "agente_aduanal", "agenteAduanal", "nombreAgente", "nombreAgenteAduanal", "razonSocialAgente"],
   broker_patent: ["broker_patent", "patente", "patenteAduanal", "patenteAgente", "patenteAgenteAduanal"],
   commercial_value_usd: ["commercial_value_usd", "valorComercialUsd", "valorComercialDolares", "valorDolares", "valorComercial"],
@@ -118,6 +121,9 @@ function parsePedimentoXml(xml: string): PedimentoXmlData {
     pedimento_full: firstXmlValue(xml, fieldAliases.pedimento_full),
     pedimento_number: pedimentoNumber,
     prv_mxn: prv,
+    coves: uniqueValues(["cove", "coves", "numeroCove", "numero_cove"].flatMap((alias) => allTagOrAttributeValues(xml, alias))),
+    invoices: uniqueValues(["factura", "facturas", "invoice", "invoiceNumber", "numeroFactura"].flatMap((alias) => allTagOrAttributeValues(xml, alias))),
+    providers: uniqueValues(["proveedor", "proveedores", "provider", "supplier", "nombreProveedor"].flatMap((alias) => allTagOrAttributeValues(xml, alias))),
     reference: firstXmlValue(xml, fieldAliases.reference),
     tariff_items: tariffItems(xml),
     total_contributions_mxn: detectedTotal ?? sumNumbers([igi, iva, dta, prv]),
@@ -159,7 +165,7 @@ function attributeText(xml: string, localName: string) {
 function tariffItems(xml: string) {
   const aliases = ["fraccion", "fraccionArancelaria", "fraccion_arancelaria", "tariffItem", "tariff_item"];
   const values = aliases.flatMap((alias) => allTagOrAttributeValues(xml, alias));
-  return Array.from(new Set(values.map((value) => value.replace(/\D/g, "") || value).filter(Boolean))).slice(0, 100);
+  return uniqueValues(values.map((value) => value.replace(/\D/g, "") || value)).slice(0, 100);
 }
 
 function allTagOrAttributeValues(xml: string, localName: string) {
@@ -219,6 +225,10 @@ function money(value: string) {
 function sumNumbers(values: (number | null)[]) {
   const validValues = values.filter((value): value is number => typeof value === "number");
   return validValues.length > 0 ? validValues.reduce((total, value) => total + value, 0) : null;
+}
+
+function uniqueValues(values: string[]) {
+  return Array.from(new Set(values.map((value) => normalizeText(value)).filter(Boolean))).slice(0, 100);
 }
 
 function cleanPedimentoNumber(value: string) {

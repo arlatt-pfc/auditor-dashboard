@@ -23,10 +23,15 @@ type PedimentoXmlData = {
   pedimento_full: string;
   pedimento_number: string;
   prv_mxn: number | null;
+  coves: string[];
+  invoices: string[];
+  providers: string[];
   reference: string;
   tariff_items: string[];
   total_contributions_mxn: number | null;
 };
+
+type BaseDocumentKind = "xml_pedimento" | "pdf_pedimento" | "cfdi_invalid" | "";
 
 type ParseResponse = {
   confidence: number;
@@ -70,6 +75,9 @@ const emptyXmlData: PedimentoXmlData = {
   pedimento_full: "",
   pedimento_number: "",
   prv_mxn: null,
+  coves: [],
+  invoices: [],
+  providers: [],
   reference: "",
   tariff_items: [],
   total_contributions_mxn: null,
@@ -114,10 +122,18 @@ const detectedFieldLabels: { key: keyof PedimentoXmlData; label: string; numeric
   { key: "total_contributions_mxn", label: "Total contribuciones MXN", numeric: true },
 ];
 
+const baseDocumentLabels: Record<BaseDocumentKind, string> = {
+  "": "Pendiente",
+  cfdi_invalid: "CFDI no válido para paso 1",
+  pdf_pedimento: "PDF Pedimento",
+  xml_pedimento: "XML Pedimento",
+};
+
 export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) {
   const router = useRouter();
   const [step, setStep] = useState(1);
-  const [xmlFile, setXmlFile] = useState<File | null>(null);
+  const [baseFile, setBaseFile] = useState<File | null>(null);
+  const [baseDocumentKind, setBaseDocumentKind] = useState<BaseDocumentKind>("");
   const [xmlData, setXmlData] = useState<PedimentoXmlData>(emptyXmlData);
   const [parseResult, setParseResult] = useState<ParseResponse | null>(null);
   const [isParsing, setIsParsing] = useState(false);
@@ -128,6 +144,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
 
   const requiredReady = requiredDocuments.every((document) => files[document.documentType]);
   const hasPedimentoNumber = xmlData.pedimento_number.trim().length > 0;
+  const stepOneCanContinue = hasPedimentoNumber && baseDocumentKind !== "cfdi_invalid";
   const loadedDocuments = useMemo(
     () =>
       [...requiredDocuments, ...optionalDocuments]
@@ -139,20 +156,52 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     [files],
   );
 
-  async function parseXml(file?: File) {
+  async function parseBaseDocument(file?: File) {
     if (!file) {
       return;
     }
 
-    setXmlFile(file);
+    setBaseFile(file);
     setIsParsing(true);
     setError("");
     setParseResult(null);
 
+    if (isXmlFile(file)) {
+      const xml = await file.text().catch(() => "");
+
+      if (isCfdiXml(xml)) {
+        setIsParsing(false);
+        setBaseDocumentKind("cfdi_invalid");
+        setXmlData(emptyXmlData);
+        setError("Este XML parece ser un CFDI. Para el paso 1 carga el XML del pedimento o el PDF del pedimento.");
+        return;
+      }
+
+      setBaseDocumentKind("xml_pedimento");
+      await parseDocument(file, "/api/customs/parse-pedimento-xml", "No se pudo leer el XML del pedimento.");
+      return;
+    }
+
+    if (isPdfFile(file)) {
+      setBaseDocumentKind("pdf_pedimento");
+      setFiles((current) => ({
+        ...current,
+        pedimento: file,
+      }));
+      await parseDocument(file, "/api/customs/parse-pedimento-pdf", "No se pudo leer el PDF del pedimento.");
+      return;
+    }
+
+    setIsParsing(false);
+    setBaseDocumentKind("");
+    setError("Carga un archivo XML o PDF de pedimento.");
+  }
+
+  async function parseDocument(file: File, endpoint: string, fallbackError: string) {
     const formData = new FormData();
     formData.append("file", file, file.name);
 
-    const response = await fetch("/api/customs/parse-pedimento-xml", {
+    const response = await fetch(endpoint, {
       body: formData,
       method: "POST",
     }).catch(() => null);
@@ -161,7 +210,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
 
     if (!response?.ok) {
       const payload = (await response?.json().catch(() => null)) as { error?: string } | null;
-      setError(payload?.error ?? "No se pudo leer el XML del pedimento.");
+      setError(payload?.error ?? fallbackError);
       return;
     }
 
@@ -174,11 +223,14 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     setXmlData((current) => {
       const next = {
         ...current,
-        [key]: key === "tariff_items" ? value.split(",").map((item) => item.trim()).filter(Boolean) : numericKey(key) ? numberOrNull(value) : value,
+        [key]: arrayKey(key) ? value.split(",").map((item) => item.trim()).filter(Boolean) : numericKey(key) ? numberOrNull(value) : value,
       };
 
-      if (key === "pedimento_number") {
-        next.operation_code = operationCodeFromPedimento(value, current.import_date);
+      if (key === "pedimento_number" || key === "import_date") {
+        next.operation_code = operationCodeFromPedimento(
+          key === "pedimento_number" ? value : current.pedimento_number,
+          key === "import_date" ? value : current.import_date,
+        );
       }
 
       return next;
@@ -196,8 +248,8 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
   }
 
   async function runAudit() {
-    if (!xmlFile || !hasPedimentoNumber) {
-      setError("Carga un XML de pedimento con número de pedimento detectado.");
+    if (!baseFile || !hasPedimentoNumber || baseDocumentKind === "cfdi_invalid") {
+      setError("Carga un XML o PDF de pedimento con número de pedimento detectado.");
       return;
     }
 
@@ -205,8 +257,11 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     setError("");
 
     const formData = new FormData();
-    formData.append("pedimento_xml", xmlFile, xmlFile.name);
-    formData.append("file", files.pedimento ?? xmlFile, files.pedimento?.name ?? xmlFile.name);
+    if (baseDocumentKind === "xml_pedimento") {
+      formData.append("pedimento_xml", baseFile, baseFile.name);
+    }
+
+    formData.append("file", files.pedimento ?? baseFile, files.pedimento?.name ?? baseFile.name);
     formData.append("audit_topic", `Customs Compliance - Expediente ${xmlData.operation_code}`);
     formData.append("engine_id", "CUSTOMS_COMPLIANCE");
     formData.append("operation_id", xmlData.operation_code);
@@ -267,11 +322,12 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
       <div className="mt-6">
         {step === 1 ? (
           <XmlStep
+            baseDocumentKind={baseDocumentKind}
             data={xmlData}
-            fileName={xmlFile?.name}
+            fileName={baseFile?.name}
             isParsing={isParsing}
             onChange={updateXmlData}
-            onFileChange={parseXml}
+            onFileChange={parseBaseDocument}
             parseResult={parseResult}
           />
         ) : null}
@@ -288,7 +344,8 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
             onRun={runAudit}
             requiredReady={requiredReady}
             result={result}
-            xmlFileName={xmlFile?.name}
+            baseDocumentKind={baseDocumentKind}
+            baseFileName={baseFile?.name}
           />
         ) : null}
       </div>
@@ -306,7 +363,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
         </button>
         <button
           className="rounded-2xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-          disabled={step === 4 || (step === 1 && !hasPedimentoNumber)}
+          disabled={step === 4 || (step === 1 && !stepOneCanContinue)}
           onClick={() => setStep((current) => Math.min(4, current + 1))}
           type="button"
         >
@@ -318,6 +375,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
 }
 
 function XmlStep({
+  baseDocumentKind,
   data,
   fileName,
   isParsing,
@@ -325,6 +383,7 @@ function XmlStep({
   onFileChange,
   parseResult,
 }: {
+  baseDocumentKind: BaseDocumentKind;
   data: PedimentoXmlData;
   fileName?: string;
   isParsing: boolean;
@@ -336,27 +395,41 @@ function XmlStep({
 
   return (
     <div>
-      <h3 className="text-xl font-semibold text-slate-900">Cargar XML del pedimento</h3>
+      <h3 className="text-xl font-semibold text-slate-900">Cargar pedimento base</h3>
       <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-        El XML del pedimento es el documento estructurado base del expediente. A partir de este archivo se poblarán automáticamente los datos principales.
+        Carga el XML del pedimento cuando esté disponible. Si solo cuentas con el PDF, el sistema intentará extraer los datos principales para iniciar el expediente.
       </p>
 
       <label className="mt-5 block rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5">
-        <span className="text-sm font-semibold text-slate-800">XML del pedimento</span>
+        <span className="text-sm font-semibold text-slate-800">XML del pedimento <span className="text-emerald-700">(recomendado)</span> o PDF del pedimento</span>
         <input
-          accept="application/xml,text/xml,.xml"
+          accept="application/xml,text/xml,application/pdf,.xml,.pdf"
           className="mt-4 block w-full text-sm text-slate-600 file:mr-4 file:rounded-xl file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-slate-800"
           onChange={(event) => onFileChange(event.target.files?.[0])}
           type="file"
         />
-        <span className="mt-3 block text-xs text-slate-500">{isParsing ? "Leyendo XML..." : fileName ?? "Pendiente de carga"}</span>
+        <span className="mt-3 block text-xs text-slate-500">{isParsing ? "Leyendo documento..." : fileName ?? "Pendiente de carga"}</span>
       </label>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+          <p className="text-sm font-semibold text-emerald-900">A) XML del pedimento</p>
+          <p className="mt-1 text-xs leading-5 text-emerald-700">Recomendado por ser estructurado y más confiable.</p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <p className="text-sm font-semibold text-slate-900">B) PDF del pedimento</p>
+          <p className="mt-1 text-xs leading-5 text-slate-600">Se procesa por texto y heurísticas editables.</p>
+        </div>
+      </div>
 
       <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-5">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h4 className="text-base font-semibold text-slate-900">Datos detectados</h4>
             <p className="mt-1 text-sm text-slate-500">Puedes editar manualmente cualquier campo faltante o incorrecto.</p>
+            <p className={`mt-2 text-xs font-semibold ${baseDocumentKind === "cfdi_invalid" ? "text-amber-700" : "text-slate-500"}`}>
+              Tipo de documento detectado: {baseDocumentLabels[baseDocumentKind]}
+            </p>
           </div>
           {parseResult ? (
             <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
@@ -383,6 +456,9 @@ function XmlStep({
               value={data.tariff_items.join(", ")}
             />
           </label>
+          <ArrayTextField label="Proveedores detectados" onChange={(value) => onChange("providers", value)} value={data.providers.join(", ")} />
+          <ArrayTextField label="Facturas detectadas" onChange={(value) => onChange("invoices", value)} value={data.invoices.join(", ")} />
+          <ArrayTextField label="COVEs detectados" onChange={(value) => onChange("coves", value)} value={data.coves.join(", ")} />
         </div>
       </div>
     </div>
@@ -431,7 +507,8 @@ function ReviewStep({
   onRun,
   requiredReady,
   result,
-  xmlFileName,
+  baseDocumentKind,
+  baseFileName,
 }: {
   canExecute: boolean;
   data: PedimentoXmlData;
@@ -442,16 +519,18 @@ function ReviewStep({
   onRun: () => void;
   requiredReady: boolean;
   result: AuditResult | null;
-  xmlFileName?: string;
+  baseDocumentKind: BaseDocumentKind;
+  baseFileName?: string;
 }) {
   return (
     <div>
       <h3 className="text-xl font-semibold text-slate-900">Revisión y ejecutar auditoría</h3>
       <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_0.9fr]">
         <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <p className="text-sm font-semibold text-slate-900">Resumen del XML detectado</p>
+          <p className="text-sm font-semibold text-slate-900">Resumen del pedimento base</p>
           <div className="mt-3 grid gap-2 text-sm text-slate-600">
-            <ReviewRow label="XML base" value={xmlFileName ?? "Pendiente"} />
+            <ReviewRow label="Documento base" value={baseFileName ?? "Pendiente"} />
+            <ReviewRow label="Tipo detectado" value={baseDocumentLabels[baseDocumentKind]} />
             <ReviewRow label="Expediente" value={data.operation_code || "Pendiente"} />
             <ReviewRow label="Pedimento" value={data.pedimento_full || data.pedimento_number || "Pendiente"} />
             <ReviewRow label="Referencia" value={data.reference || "Pendiente"} />
@@ -518,6 +597,19 @@ function TextField({
   );
 }
 
+function ArrayTextField({ label, onChange, value }: { label: string; onChange: (value: string) => void; value: string }) {
+  return (
+    <label className="block">
+      <span className="text-sm font-semibold text-slate-700">{label}</span>
+      <input
+        className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+        onChange={(event) => onChange(event.target.value)}
+        value={value}
+      />
+    </label>
+  );
+}
+
 function ReviewRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl bg-white px-3 py-2">
@@ -529,6 +621,10 @@ function ReviewRow({ label, value }: { label: string; value: string }) {
 
 function numericKey(key: keyof PedimentoXmlData) {
   return detectedFieldLabels.some((field) => field.key === key && field.numeric);
+}
+
+function arrayKey(key: keyof PedimentoXmlData) {
+  return key === "tariff_items" || key === "providers" || key === "invoices" || key === "coves";
 }
 
 function numberOrNull(value: string) {
@@ -545,7 +641,23 @@ function stringValue(value: PedimentoXmlData[keyof PedimentoXmlData]) {
 }
 
 function operationCodeFromPedimento(pedimentoNumber: string, importDate: string) {
-  const year = importDate.match(/\b(20\d{2}|19\d{2})\b/)?.[1] ?? String(new Date().getFullYear());
+  const fullYear = importDate.match(/\b(20\d{2}|19\d{2})\b/)?.[1];
+  const shortYear = importDate.match(/[/-](\d{2})$/)?.[1];
+  const year = fullYear ?? (shortYear ? `20${shortYear}` : String(new Date().getFullYear()));
   const digits = pedimentoNumber.replace(/\D/g, "");
   return digits ? `IMP-${year}-${digits}` : "";
+}
+
+function isXmlFile(file: File) {
+  const fileName = file.name.toLowerCase();
+  return fileName.endsWith(".xml") || file.type === "application/xml" || file.type === "text/xml";
+}
+
+function isPdfFile(file: File) {
+  const fileName = file.name.toLowerCase();
+  return fileName.endsWith(".pdf") || file.type === "application/pdf";
+}
+
+function isCfdiXml(xml: string) {
+  return /<(?:[\w.-]+:)?Comprobante\b/i.test(xml) && /\b(?:[\w.-]+:)?Emisor\b|\b(?:[\w.-]+:)?Receptor\b/i.test(xml);
 }
