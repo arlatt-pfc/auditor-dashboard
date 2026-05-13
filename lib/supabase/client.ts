@@ -18,6 +18,10 @@ type InsertOptions = {
   select?: string;
 };
 
+type UpdateOptions = InsertOptions & {
+  eq: Record<string, Primitive>;
+};
+
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -71,6 +75,36 @@ export async function supabaseInsert<T>(table: string, payload: Record<string, u
     },
     method: "POST",
     cache: "no-store",
+  }).catch(() => null);
+
+  if (!response?.ok) {
+    return null;
+  }
+
+  const rows = (await response.json()) as T[];
+  return rows[0] ?? null;
+}
+
+export async function supabaseUpdate<T>(table: string, payload: Record<string, unknown>, options: UpdateOptions): Promise<T | null> {
+  const request = buildSupabaseRequest(table, {
+    accessToken: options.accessToken,
+    eq: options.eq,
+    select: options.select ?? "*",
+  });
+
+  if (!request) {
+    return null;
+  }
+
+  const response = await fetch(request.url, {
+    body: JSON.stringify(payload),
+    cache: "no-store",
+    headers: {
+      ...request.headers,
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+    },
+    method: "PATCH",
   }).catch(() => null);
 
   if (!response?.ok) {
