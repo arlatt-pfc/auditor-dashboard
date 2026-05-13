@@ -14,10 +14,19 @@ type AuditApiResponse = {
 type NormalizedAuditResult = {
   compliance_percent: number;
   executive_dictamen: string;
+  loaded_documents?: unknown;
+  missing_required_documents?: unknown;
+  pedimento_data?: unknown;
   persisted: boolean;
   report_pdf_url: string | null;
   risk_level: string;
   top_critical_gaps: string[];
+};
+
+type AuditMetadata = {
+  loaded_documents: unknown;
+  missing_required_documents: unknown;
+  pedimento_data: unknown;
 };
 
 const CUSTOMS_ENGINE_CODE = "CUSTOMS_COMPLIANCE";
@@ -85,6 +94,11 @@ export async function POST(request: Request) {
     operationId;
   const auditTopic = text(incomingFormData.get("audit_topic")) || `Customs Compliance - ${operationId || file.name}`;
   const engineId = text(incomingFormData.get("engine_id")) || CUSTOMS_ENGINE_CODE;
+  const auditMetadata: AuditMetadata = {
+    loaded_documents: parseJson(text(incomingFormData.get("loaded_documents"))),
+    missing_required_documents: parseJson(text(incomingFormData.get("missing_required_documents"))),
+    pedimento_data: parseJson(text(incomingFormData.get("pedimento_data"))),
+  };
 
   const outboundFormData = new FormData();
   outboundFormData.append("file", file, file.name);
@@ -118,6 +132,9 @@ export async function POST(request: Request) {
     "import_date",
     "payment_date",
     "pedimento_xml_json",
+    "pedimento_data",
+    "missing_required_documents",
+    "loaded_documents",
   ]) {
     const value = text(incomingFormData.get(metadataKey));
 
@@ -151,9 +168,13 @@ export async function POST(request: Request) {
     );
   }
 
-  const result = normalizeAuditResult(payload as AuditApiResponse);
+  const result = {
+    ...normalizeAuditResult(payload as AuditApiResponse),
+    ...auditMetadata,
+  };
   const persisted = await persistAuditResult({
     accessToken: auth.accessToken,
+    auditMetadata,
     auditTopic,
     companyId: auth.profile.companyId,
     engineId,
@@ -170,6 +191,7 @@ export async function POST(request: Request) {
 
 async function persistAuditResult({
   accessToken,
+  auditMetadata,
   auditTopic,
   companyId,
   engineId,
@@ -178,6 +200,7 @@ async function persistAuditResult({
   userId,
 }: {
   accessToken: string;
+  auditMetadata: AuditMetadata;
   auditTopic: string;
   companyId: string;
   engineId: string;
@@ -224,7 +247,10 @@ async function persistAuditResult({
       executed_by: userId,
       operation_id: operationRecordId,
       report_pdf_url: result.report_pdf_url,
-      result_json: result,
+      result_json: {
+        ...result,
+        metadata: auditMetadata,
+      },
       status: "completed",
     },
     {

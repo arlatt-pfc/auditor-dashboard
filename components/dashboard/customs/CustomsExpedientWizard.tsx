@@ -180,9 +180,14 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
   const [isRunning, setIsRunning] = useState(false);
   const [result, setResult] = useState<AuditResult | null>(null);
 
-  const requiredReady = requiredDocuments.every((document) => files[document.documentType]);
   const hasPedimentoNumber = xmlData.pedimento_number.trim().length > 0;
+  const hasOperationCode = xmlData.operation_code.trim().length > 0;
+  const canRunWithBasePedimento = Boolean(baseFile) && hasPedimentoNumber && hasOperationCode && baseDocumentKind !== "cfdi_invalid";
   const stepOneCanContinue = hasPedimentoNumber && baseDocumentKind !== "cfdi_invalid";
+  const missingRequiredDocuments = useMemo(
+    () => requiredDocuments.filter((document) => !files[document.documentType]),
+    [files],
+  );
   const loadedDocuments = useMemo(
     () =>
       [...requiredDocuments, ...optionalDocuments]
@@ -318,7 +323,14 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
   }
 
   async function runAudit() {
-    if (!baseFile || !hasPedimentoNumber || baseDocumentKind === "cfdi_invalid") {
+    if (!canRunWithBasePedimento) {
+      setError("Carga un XML o PDF de pedimento con número de pedimento detectado.");
+      return;
+    }
+
+    const selectedBaseFile = baseFile;
+
+    if (!selectedBaseFile) {
       setError("Carga un XML o PDF de pedimento con número de pedimento detectado.");
       return;
     }
@@ -328,10 +340,10 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
 
     const formData = new FormData();
     if (baseDocumentKind === "xml_pedimento") {
-      formData.append("pedimento_xml", baseFile, baseFile.name);
+      formData.append("pedimento_xml", selectedBaseFile, selectedBaseFile.name);
     }
 
-    formData.append("file", files.pedimento ?? baseFile, files.pedimento?.name ?? baseFile.name);
+    formData.append("file", files.pedimento ?? selectedBaseFile, files.pedimento?.name ?? selectedBaseFile.name);
     formData.append("audit_topic", `Customs Compliance - Expediente ${xmlData.operation_code}`);
     formData.append("engine_id", "CUSTOMS_COMPLIANCE");
     formData.append("operation_id", xmlData.operation_code);
@@ -346,6 +358,9 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     formData.append("import_date", xmlData.import_date);
     formData.append("payment_date", xmlData.payment_date);
     formData.append("pedimento_xml_json", JSON.stringify(xmlData));
+    formData.append("pedimento_data", JSON.stringify(xmlData));
+    formData.append("missing_required_documents", JSON.stringify(documentSummary(missingRequiredDocuments)));
+    formData.append("loaded_documents", JSON.stringify(documentSummary(loadedDocuments)));
 
     for (const [documentType, file] of Object.entries(files)) {
       if (file) {
@@ -411,11 +426,11 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
             canExecute={canExecute}
             data={xmlData}
             error={error}
-            hasPedimentoNumber={hasPedimentoNumber}
+            canRunWithBasePedimento={canRunWithBasePedimento}
             isRunning={isRunning}
             loadedDocuments={loadedDocuments}
+            missingRequiredDocuments={missingRequiredDocuments}
             onRun={runAudit}
-            requiredReady={requiredReady}
             result={result}
             baseDocumentKind={baseDocumentKind}
             baseFileName={baseFile?.name}
@@ -619,26 +634,26 @@ function DocumentsStep({
 }
 
 function ReviewStep({
+  canRunWithBasePedimento,
   canExecute,
   data,
   error,
-  hasPedimentoNumber,
   isRunning,
   loadedDocuments,
+  missingRequiredDocuments,
   onRun,
-  requiredReady,
   result,
   baseDocumentKind,
   baseFileName,
 }: {
+  canRunWithBasePedimento: boolean;
   canExecute: boolean;
   data: PedimentoXmlData;
   error: string;
-  hasPedimentoNumber: boolean;
   isRunning: boolean;
   loadedDocuments: (DocumentSlot & { file?: File })[];
+  missingRequiredDocuments: DocumentSlot[];
   onRun: () => void;
-  requiredReady: boolean;
   result: AuditResult | null;
   baseDocumentKind: BaseDocumentKind;
   baseFileName?: string;
@@ -673,6 +688,21 @@ function ReviewStep({
           </div>
         </section>
       </div>
+      {missingRequiredDocuments.length > 0 ? (
+        <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+          <p className="text-sm font-semibold text-amber-900">Documentos faltantes</p>
+          <p className="mt-2 text-sm leading-6 text-amber-800">
+            La auditoría se ejecutará con brechas documentales por documentos no cargados. Puedes ejecutar la auditoría; los documentos faltantes se reportarán como hallazgos.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {missingRequiredDocuments.map((document) => (
+              <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-amber-800" key={document.documentType}>
+                {document.label}
+              </span>
+            ))}
+          </div>
+        </section>
+      ) : null}
       {error ? <p className="mt-4 text-sm font-semibold text-red-700">{error}</p> : null}
       {result ? (
         <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
@@ -682,7 +712,7 @@ function ReviewStep({
       ) : null}
       <button
         className="mt-5 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-        disabled={!canExecute || !hasPedimentoNumber || !requiredReady || isRunning}
+        disabled={!canExecute || !canRunWithBasePedimento || isRunning}
         onClick={onRun}
         type="button"
       >
@@ -812,6 +842,14 @@ function arrayKey(key: keyof PedimentoXmlData) {
 
 function longTextKey(key: keyof PedimentoXmlData) {
   return key === "importer_name";
+}
+
+function documentSummary(documents: (DocumentSlot & { file?: File })[]) {
+  return documents.map((document) => ({
+    document_type: document.documentType,
+    file_name: document.file?.name ?? null,
+    label: document.label,
+  }));
 }
 
 function numberOrNull(value: string) {
