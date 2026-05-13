@@ -270,7 +270,7 @@ async function getUserProfile(accessToken: string, userId: string): Promise<User
     },
     limit: 1,
     requireAccessToken: true,
-    select: "user_id,company_id,full_name,role",
+    select: "*",
   });
   const row = rows[0];
 

@@ -1,0 +1,19 @@
+[Unit]
+Description=LDA Audit API
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/lda/audit-api
+Environment=AUDIT_PIPELINE_SCRIPT=/opt/lda/auditor-dashboard/pipeline/run_full_audit.py
+Environment=AUDIT_PYTHON_BIN=/opt/lda/audit-api/.venv/bin/python
+Environment=AUDIT_API_TMP_DIR=/tmp/lda-audit-api
+Environment=AUDIT_PIPELINE_TIMEOUT_SECONDS=900
+ExecStart=/opt/lda/audit-api/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
