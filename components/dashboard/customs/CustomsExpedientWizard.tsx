@@ -167,6 +167,8 @@ const baseDocumentLabels: Record<BaseDocumentKind, string> = {
 };
 
 export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) {
+  void canExecute;
+
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [baseFile, setBaseFile] = useState<File | null>(null);
@@ -181,8 +183,15 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
   const [result, setResult] = useState<AuditResult | null>(null);
 
   const hasPedimentoNumber = xmlData.pedimento_number.trim().length > 0;
-  const hasOperationCode = xmlData.operation_code.trim().length > 0;
-  const canRunWithBasePedimento = Boolean(baseFile) && hasPedimentoNumber && hasOperationCode && baseDocumentKind !== "cfdi_invalid";
+  const isCfdiInvalid = baseDocumentKind === "cfdi_invalid";
+  const isUploading = isParsing;
+  const canRunAudit =
+    !!baseFile &&
+    !!xmlData.pedimento_number &&
+    !!xmlData.operation_code &&
+    !isCfdiInvalid &&
+    !isUploading &&
+    !isRunning;
   const stepOneCanContinue = hasPedimentoNumber && baseDocumentKind !== "cfdi_invalid";
   const missingRequiredDocuments = useMemo(
     () => requiredDocuments.filter((document) => !files[document.documentType]),
@@ -323,7 +332,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
   }
 
   async function runAudit() {
-    if (!canRunWithBasePedimento) {
+    if (!canRunAudit) {
       setError("Carga un XML o PDF de pedimento con número de pedimento detectado.");
       return;
     }
@@ -423,10 +432,9 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
         {step === 3 ? <DocumentsStep documents={optionalDocuments} files={files} onChange={updateFile} title="Documentos opcionales / preferenciales" /> : null}
         {step === 4 ? (
           <ReviewStep
-            canExecute={canExecute}
             data={xmlData}
             error={error}
-            canRunWithBasePedimento={canRunWithBasePedimento}
+            canRunAudit={canRunAudit}
             isRunning={isRunning}
             loadedDocuments={loadedDocuments}
             missingRequiredDocuments={missingRequiredDocuments}
@@ -634,8 +642,7 @@ function DocumentsStep({
 }
 
 function ReviewStep({
-  canRunWithBasePedimento,
-  canExecute,
+  canRunAudit,
   data,
   error,
   isRunning,
@@ -646,8 +653,7 @@ function ReviewStep({
   baseDocumentKind,
   baseFileName,
 }: {
-  canRunWithBasePedimento: boolean;
-  canExecute: boolean;
+  canRunAudit: boolean;
   data: PedimentoXmlData;
   error: string;
   isRunning: boolean;
@@ -712,7 +718,7 @@ function ReviewStep({
       ) : null}
       <button
         className="mt-5 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-        disabled={!canExecute || !canRunWithBasePedimento || isRunning}
+        disabled={!canRunAudit}
         onClick={onRun}
         type="button"
       >
