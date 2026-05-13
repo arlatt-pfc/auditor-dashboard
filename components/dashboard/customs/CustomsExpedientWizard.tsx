@@ -5,18 +5,42 @@ import { useRouter } from "next/navigation";
 
 import type { CustomsDocumentType } from "@/lib/customs/types";
 
-type ExpedientData = {
-  broker: string;
-  customsReference: string;
-  importer: string;
-  operationCode: string;
-  pedimento: string;
+type PedimentoXmlData = {
+  broker_name: string;
+  broker_patent: string;
+  commercial_value_usd: number | null;
+  customs_office: string;
+  customs_value_mxn: number | null;
+  dta_mxn: number | null;
+  exchange_rate: number | null;
+  igi_mxn: number | null;
+  import_date: string;
+  importer_name: string;
+  importer_rfc: string;
+  iva_mxn: number | null;
+  operation_code: string;
+  payment_date: string;
+  pedimento_full: string;
+  pedimento_number: string;
+  prv_mxn: number | null;
+  reference: string;
+  tariff_items: string[];
+  total_contributions_mxn: number | null;
 };
 
+type ParseResponse = {
+  confidence: number;
+  detected: PedimentoXmlData;
+  detected_fields: string[];
+  missing_fields: string[];
+};
+
+type SupportDocumentType = CustomsDocumentType | "forwarding_invoice";
+
 type DocumentSlot = {
-  documentType: CustomsDocumentType;
-  label: string;
   accept: string;
+  documentType: SupportDocumentType;
+  label: string;
 };
 
 type AuditResult = {
@@ -28,13 +52,36 @@ type AuditResult = {
   top_critical_gaps: string[];
 };
 
+const emptyXmlData: PedimentoXmlData = {
+  broker_name: "",
+  broker_patent: "",
+  commercial_value_usd: null,
+  customs_office: "",
+  customs_value_mxn: null,
+  dta_mxn: null,
+  exchange_rate: null,
+  igi_mxn: null,
+  import_date: "",
+  importer_name: "",
+  importer_rfc: "",
+  iva_mxn: null,
+  operation_code: "",
+  payment_date: "",
+  pedimento_full: "",
+  pedimento_number: "",
+  prv_mxn: null,
+  reference: "",
+  tariff_items: [],
+  total_contributions_mxn: null,
+};
+
 const requiredDocuments: DocumentSlot[] = [
-  { documentType: "pedimento", label: "Pedimento", accept: "application/pdf,.pdf" },
+  { documentType: "pedimento", label: "Pedimento PDF", accept: "application/pdf,.pdf" },
   { documentType: "commercial_invoice", label: "Facturas comerciales", accept: "application/pdf,.pdf" },
-  { documentType: "bill_of_lading", label: "Bill of Lading", accept: "application/pdf,.pdf" },
+  { documentType: "bill_of_lading", label: "Bill of Lading / documento transporte", accept: "application/pdf,.pdf" },
   { documentType: "broker_expense_account", label: "Cuenta de gastos", accept: "application/pdf,.pdf" },
-  { documentType: "cfdi_pdf", label: "CFDI PDF", accept: "application/pdf,.pdf" },
-  { documentType: "cfdi_xml", label: "CFDI XML", accept: "application/xml,text/xml,.xml" },
+  { documentType: "cfdi_pdf", label: "CFDI PDF del agente", accept: "application/pdf,.pdf" },
+  { documentType: "cfdi_xml", label: "CFDI XML del agente", accept: "application/xml,text/xml,.xml" },
   { documentType: "data_sheet", label: "Hoja de datos", accept: "application/pdf,.pdf" },
 ];
 
@@ -42,25 +89,45 @@ const optionalDocuments: DocumentSlot[] = [
   { documentType: "certificate_of_origin", label: "Certificado de origen T-MEC", accept: "application/pdf,.pdf" },
   { documentType: "cove", label: "COVE", accept: "application/pdf,.pdf" },
   { documentType: "annex", label: "Anexos", accept: "application/pdf,.pdf" },
+  { documentType: "forwarding_invoice", label: "Factura forwarding", accept: "application/pdf,.pdf" },
+];
+
+const detectedFieldLabels: { key: keyof PedimentoXmlData; label: string; numeric?: boolean }[] = [
+  { key: "operation_code", label: "Código expediente" },
+  { key: "pedimento_number", label: "Pedimento number" },
+  { key: "pedimento_full", label: "Pedimento full" },
+  { key: "reference", label: "Referencia aduanal" },
+  { key: "importer_name", label: "Importador" },
+  { key: "importer_rfc", label: "RFC importador" },
+  { key: "broker_name", label: "Agente aduanal" },
+  { key: "broker_patent", label: "Patente agente" },
+  { key: "customs_office", label: "Aduana" },
+  { key: "import_date", label: "Fecha importación" },
+  { key: "payment_date", label: "Fecha pago" },
+  { key: "exchange_rate", label: "Tipo de cambio", numeric: true },
+  { key: "customs_value_mxn", label: "Valor aduana MXN", numeric: true },
+  { key: "commercial_value_usd", label: "Valor comercial USD", numeric: true },
+  { key: "igi_mxn", label: "IGI MXN", numeric: true },
+  { key: "iva_mxn", label: "IVA MXN", numeric: true },
+  { key: "dta_mxn", label: "DTA MXN", numeric: true },
+  { key: "prv_mxn", label: "PRV MXN", numeric: true },
+  { key: "total_contributions_mxn", label: "Total contribuciones MXN", numeric: true },
 ];
 
 export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) {
   const router = useRouter();
   const [step, setStep] = useState(1);
-  const [data, setData] = useState<ExpedientData>({
-    broker: "",
-    customsReference: "",
-    importer: "",
-    operationCode: "",
-    pedimento: "",
-  });
-  const [files, setFiles] = useState<Partial<Record<CustomsDocumentType, File>>>({});
+  const [xmlFile, setXmlFile] = useState<File | null>(null);
+  const [xmlData, setXmlData] = useState<PedimentoXmlData>(emptyXmlData);
+  const [parseResult, setParseResult] = useState<ParseResponse | null>(null);
+  const [isParsing, setIsParsing] = useState(false);
+  const [files, setFiles] = useState<Partial<Record<SupportDocumentType, File>>>({});
   const [error, setError] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [result, setResult] = useState<AuditResult | null>(null);
 
   const requiredReady = requiredDocuments.every((document) => files[document.documentType]);
-  const dataReady = Object.values(data).every((value) => value.trim().length > 0);
+  const hasPedimentoNumber = xmlData.pedimento_number.trim().length > 0;
   const loadedDocuments = useMemo(
     () =>
       [...requiredDocuments, ...optionalDocuments]
@@ -72,15 +139,54 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     [files],
   );
 
-  function updateData(key: keyof ExpedientData, value: string) {
-    setData((current) => ({
-      ...current,
-      [key]: value,
-    }));
+  async function parseXml(file?: File) {
+    if (!file) {
+      return;
+    }
+
+    setXmlFile(file);
+    setIsParsing(true);
+    setError("");
+    setParseResult(null);
+
+    const formData = new FormData();
+    formData.append("file", file, file.name);
+
+    const response = await fetch("/api/customs/parse-pedimento-xml", {
+      body: formData,
+      method: "POST",
+    }).catch(() => null);
+
+    setIsParsing(false);
+
+    if (!response?.ok) {
+      const payload = (await response?.json().catch(() => null)) as { error?: string } | null;
+      setError(payload?.error ?? "No se pudo leer el XML del pedimento.");
+      return;
+    }
+
+    const payload = (await response.json()) as ParseResponse;
+    setParseResult(payload);
+    setXmlData(payload.detected);
+  }
+
+  function updateXmlData(key: keyof PedimentoXmlData, value: string) {
+    setXmlData((current) => {
+      const next = {
+        ...current,
+        [key]: key === "tariff_items" ? value.split(",").map((item) => item.trim()).filter(Boolean) : numericKey(key) ? numberOrNull(value) : value,
+      };
+
+      if (key === "pedimento_number") {
+        next.operation_code = operationCodeFromPedimento(value, current.import_date);
+      }
+
+      return next;
+    });
     setError("");
   }
 
-  function updateFile(documentType: CustomsDocumentType, file?: File) {
+  function updateFile(documentType: SupportDocumentType, file?: File) {
     setFiles((current) => ({
       ...current,
       [documentType]: file,
@@ -90,10 +196,8 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
   }
 
   async function runAudit() {
-    const auditFile = files.pedimento ?? Object.values(files).find((file) => file?.type === "application/pdf");
-
-    if (!auditFile) {
-      setError("Carga el PDF del pedimento para ejecutar la auditoria.");
+    if (!xmlFile || !hasPedimentoNumber) {
+      setError("Carga un XML de pedimento con número de pedimento detectado.");
       return;
     }
 
@@ -101,14 +205,29 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     setError("");
 
     const formData = new FormData();
-    formData.append("file", auditFile, auditFile.name);
-    formData.append("audit_topic", `Customs Compliance - Expediente ${data.operationCode}`);
+    formData.append("pedimento_xml", xmlFile, xmlFile.name);
+    formData.append("file", files.pedimento ?? xmlFile, files.pedimento?.name ?? xmlFile.name);
+    formData.append("audit_topic", `Customs Compliance - Expediente ${xmlData.operation_code}`);
     formData.append("engine_id", "CUSTOMS_COMPLIANCE");
-    formData.append("operation_id", data.operationCode);
-    formData.append("pedimento", data.pedimento);
-    formData.append("customs_reference", data.customsReference);
-    formData.append("importer", data.importer);
-    formData.append("broker", data.broker);
+    formData.append("operation_id", xmlData.operation_code);
+    formData.append("pedimento", xmlData.pedimento_full || xmlData.pedimento_number);
+    formData.append("pedimento_number", xmlData.pedimento_number);
+    formData.append("customs_reference", xmlData.reference);
+    formData.append("importer", xmlData.importer_name);
+    formData.append("importer_rfc", xmlData.importer_rfc);
+    formData.append("broker", xmlData.broker_name);
+    formData.append("broker_patent", xmlData.broker_patent);
+    formData.append("customs_office", xmlData.customs_office);
+    formData.append("import_date", xmlData.import_date);
+    formData.append("payment_date", xmlData.payment_date);
+    formData.append("pedimento_xml_json", JSON.stringify(xmlData));
+
+    for (const [documentType, file] of Object.entries(files)) {
+      if (file) {
+        formData.append("support_files", file, file.name);
+        formData.append("support_document_types", documentType);
+      }
+    }
 
     const response = await fetch("/api/audits/run", {
       body: formData,
@@ -146,22 +265,35 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
       </div>
 
       <div className="mt-6">
-        {step === 1 ? <ExpedientStep data={data} onChange={updateData} /> : null}
-        {step === 2 ? <DocumentsStep documents={requiredDocuments} files={files} onChange={updateFile} title="Documentos requeridos" /> : null}
-        {step === 3 ? <DocumentsStep documents={optionalDocuments} files={files} onChange={updateFile} title="Documentos opcionales" /> : null}
+        {step === 1 ? (
+          <XmlStep
+            data={xmlData}
+            fileName={xmlFile?.name}
+            isParsing={isParsing}
+            onChange={updateXmlData}
+            onFileChange={parseXml}
+            parseResult={parseResult}
+          />
+        ) : null}
+        {step === 2 ? <DocumentsStep documents={requiredDocuments} files={files} onChange={updateFile} title="Documentos soporte requeridos" /> : null}
+        {step === 3 ? <DocumentsStep documents={optionalDocuments} files={files} onChange={updateFile} title="Documentos opcionales / preferenciales" /> : null}
         {step === 4 ? (
           <ReviewStep
             canExecute={canExecute}
-            dataReady={dataReady}
+            data={xmlData}
             error={error}
+            hasPedimentoNumber={hasPedimentoNumber}
             isRunning={isRunning}
             loadedDocuments={loadedDocuments}
             onRun={runAudit}
             requiredReady={requiredReady}
             result={result}
+            xmlFileName={xmlFile?.name}
           />
         ) : null}
       </div>
+
+      {error && step !== 4 ? <p className="mt-5 text-sm font-semibold text-red-700">{error}</p> : null}
 
       <div className="mt-6 flex justify-between border-t border-slate-200 pt-5">
         <button
@@ -174,7 +306,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
         </button>
         <button
           className="rounded-2xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-          disabled={step === 4}
+          disabled={step === 4 || (step === 1 && !hasPedimentoNumber)}
           onClick={() => setStep((current) => Math.min(4, current + 1))}
           type="button"
         >
@@ -185,16 +317,73 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
   );
 }
 
-function ExpedientStep({ data, onChange }: { data: ExpedientData; onChange: (key: keyof ExpedientData, value: string) => void }) {
+function XmlStep({
+  data,
+  fileName,
+  isParsing,
+  onChange,
+  onFileChange,
+  parseResult,
+}: {
+  data: PedimentoXmlData;
+  fileName?: string;
+  isParsing: boolean;
+  onChange: (key: keyof PedimentoXmlData, value: string) => void;
+  onFileChange: (file?: File) => void;
+  parseResult: ParseResponse | null;
+}) {
+  const missingCount = parseResult?.missing_fields.length ?? 0;
+
   return (
     <div>
-      <h3 className="text-xl font-semibold text-slate-900">Datos del expediente</h3>
-      <div className="mt-5 grid gap-4 md:grid-cols-2">
-        <TextField label="Código expediente" value={data.operationCode} onChange={(value) => onChange("operationCode", value)} />
-        <TextField label="Pedimento" value={data.pedimento} onChange={(value) => onChange("pedimento", value)} />
-        <TextField label="Referencia aduanal" value={data.customsReference} onChange={(value) => onChange("customsReference", value)} />
-        <TextField label="Importador" value={data.importer} onChange={(value) => onChange("importer", value)} />
-        <TextField label="Agente aduanal" value={data.broker} onChange={(value) => onChange("broker", value)} />
+      <h3 className="text-xl font-semibold text-slate-900">Cargar XML del pedimento</h3>
+      <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
+        El XML del pedimento es el documento estructurado base del expediente. A partir de este archivo se poblarán automáticamente los datos principales.
+      </p>
+
+      <label className="mt-5 block rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5">
+        <span className="text-sm font-semibold text-slate-800">XML del pedimento</span>
+        <input
+          accept="application/xml,text/xml,.xml"
+          className="mt-4 block w-full text-sm text-slate-600 file:mr-4 file:rounded-xl file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-slate-800"
+          onChange={(event) => onFileChange(event.target.files?.[0])}
+          type="file"
+        />
+        <span className="mt-3 block text-xs text-slate-500">{isParsing ? "Leyendo XML..." : fileName ?? "Pendiente de carga"}</span>
+      </label>
+
+      <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-5">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h4 className="text-base font-semibold text-slate-900">Datos detectados</h4>
+            <p className="mt-1 text-sm text-slate-500">Puedes editar manualmente cualquier campo faltante o incorrecto.</p>
+          </div>
+          {parseResult ? (
+            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+              {parseResult.confidence}% confianza · {missingCount} faltantes
+            </span>
+          ) : null}
+        </div>
+
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          {detectedFieldLabels.map((field) => (
+            <TextField
+              key={field.key}
+              label={field.label}
+              missing={parseResult ? parseResult.missing_fields.includes(field.key) : false}
+              onChange={(value) => onChange(field.key, value)}
+              value={stringValue(data[field.key])}
+            />
+          ))}
+          <label className="block md:col-span-2">
+            <span className="text-sm font-semibold text-slate-700">Fracciones arancelarias</span>
+            <textarea
+              className="mt-2 min-h-24 w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+              onChange={(event) => onChange("tariff_items", event.target.value)}
+              value={data.tariff_items.join(", ")}
+            />
+          </label>
+        </div>
       </div>
     </div>
   );
@@ -207,8 +396,8 @@ function DocumentsStep({
   title,
 }: {
   documents: DocumentSlot[];
-  files: Partial<Record<CustomsDocumentType, File>>;
-  onChange: (documentType: CustomsDocumentType, file?: File) => void;
+  files: Partial<Record<SupportDocumentType, File>>;
+  onChange: (documentType: SupportDocumentType, file?: File) => void;
   title: string;
 }) {
   return (
@@ -234,36 +423,55 @@ function DocumentsStep({
 
 function ReviewStep({
   canExecute,
-  dataReady,
+  data,
   error,
+  hasPedimentoNumber,
   isRunning,
   loadedDocuments,
   onRun,
   requiredReady,
   result,
+  xmlFileName,
 }: {
   canExecute: boolean;
-  dataReady: boolean;
+  data: PedimentoXmlData;
   error: string;
+  hasPedimentoNumber: boolean;
   isRunning: boolean;
   loadedDocuments: (DocumentSlot & { file?: File })[];
   onRun: () => void;
   requiredReady: boolean;
   result: AuditResult | null;
+  xmlFileName?: string;
 }) {
   return (
     <div>
       <h3 className="text-xl font-semibold text-slate-900">Revisión y ejecutar auditoría</h3>
-      <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-        <p className="text-sm font-semibold text-slate-900">Documentos cargados</p>
-        <div className="mt-3 grid gap-2 md:grid-cols-2">
-          {loadedDocuments.map((document) => (
-            <div className="rounded-xl bg-white px-3 py-2 text-sm text-slate-600" key={document.documentType}>
-              <span className="font-medium text-slate-900">{document.label}</span>
-              <span className="mt-1 block text-xs">{document.file?.name}</span>
-            </div>
-          ))}
-        </div>
+      <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_0.9fr]">
+        <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <p className="text-sm font-semibold text-slate-900">Resumen del XML detectado</p>
+          <div className="mt-3 grid gap-2 text-sm text-slate-600">
+            <ReviewRow label="XML base" value={xmlFileName ?? "Pendiente"} />
+            <ReviewRow label="Expediente" value={data.operation_code || "Pendiente"} />
+            <ReviewRow label="Pedimento" value={data.pedimento_full || data.pedimento_number || "Pendiente"} />
+            <ReviewRow label="Referencia" value={data.reference || "Pendiente"} />
+            <ReviewRow label="Importador" value={data.importer_name || "Pendiente"} />
+            <ReviewRow label="Agente" value={data.broker_name || "Pendiente"} />
+            <ReviewRow label="Contribuciones" value={stringValue(data.total_contributions_mxn) || "Pendiente"} />
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <p className="text-sm font-semibold text-slate-900">Documentos cargados</p>
+          <div className="mt-3 grid gap-2">
+            {loadedDocuments.map((document) => (
+              <div className="rounded-xl bg-white px-3 py-2 text-sm text-slate-600" key={document.documentType}>
+                <span className="font-medium text-slate-900">{document.label}</span>
+                <span className="mt-1 block text-xs">{document.file?.name}</span>
+              </div>
+            ))}
+          </div>
+        </section>
       </div>
       {error ? <p className="mt-4 text-sm font-semibold text-red-700">{error}</p> : null}
       {result ? (
@@ -274,7 +482,7 @@ function ReviewStep({
       ) : null}
       <button
         className="mt-5 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-        disabled={!canExecute || !dataReady || !requiredReady || isRunning}
+        disabled={!canExecute || !hasPedimentoNumber || !requiredReady || isRunning}
         onClick={onRun}
         type="button"
       >
@@ -284,10 +492,23 @@ function ReviewStep({
   );
 }
 
-function TextField({ label, onChange, value }: { label: string; onChange: (value: string) => void; value: string }) {
+function TextField({
+  label,
+  missing,
+  onChange,
+  value,
+}: {
+  label: string;
+  missing?: boolean;
+  onChange: (value: string) => void;
+  value: string;
+}) {
   return (
     <label className="block">
-      <span className="text-sm font-semibold text-slate-700">{label}</span>
+      <span className="flex items-center justify-between gap-3 text-sm font-semibold text-slate-700">
+        {label}
+        {missing ? <span className="text-xs font-medium text-amber-600">Faltante</span> : null}
+      </span>
       <input
         className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
         onChange={(event) => onChange(event.target.value)}
@@ -295,4 +516,36 @@ function TextField({ label, onChange, value }: { label: string; onChange: (value
       />
     </label>
   );
+}
+
+function ReviewRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl bg-white px-3 py-2">
+      <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{label}</span>
+      <span className="mt-1 block break-words font-medium text-slate-800">{value}</span>
+    </div>
+  );
+}
+
+function numericKey(key: keyof PedimentoXmlData) {
+  return detectedFieldLabels.some((field) => field.key === key && field.numeric);
+}
+
+function numberOrNull(value: string) {
+  const parsed = Number(value.replace(/[$,\s]/g, ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function stringValue(value: PedimentoXmlData[keyof PedimentoXmlData]) {
+  if (Array.isArray(value)) {
+    return value.join(", ");
+  }
+
+  return value === null ? "" : String(value);
+}
+
+function operationCodeFromPedimento(pedimentoNumber: string, importDate: string) {
+  const year = importDate.match(/\b(20\d{2}|19\d{2})\b/)?.[1] ?? String(new Date().getFullYear());
+  const digits = pedimentoNumber.replace(/\D/g, "");
+  return digits ? `IMP-${year}-${digits}` : "";
 }

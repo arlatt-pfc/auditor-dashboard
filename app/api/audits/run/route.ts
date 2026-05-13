@@ -49,13 +49,18 @@ export async function POST(request: Request) {
   }
 
   const file = incomingFormData.get("file");
+  const pedimentoXml = incomingFormData.get("pedimento_xml");
 
   if (!(file instanceof File)) {
-    return NextResponse.json({ error: "PDF_FILE_REQUIRED" }, { status: 400 });
+    return NextResponse.json({ error: "AUDIT_FILE_REQUIRED" }, { status: 400 });
   }
 
-  if (!isPdf(file)) {
-    return NextResponse.json({ error: "PDF_FILE_REQUIRED" }, { status: 400 });
+  if (!isPdf(file) && !isXml(file)) {
+    return NextResponse.json({ error: "AUDIT_FILE_MUST_BE_PDF_OR_XML" }, { status: 400 });
+  }
+
+  if (pedimentoXml && (!(pedimentoXml instanceof File) || !isXml(pedimentoXml))) {
+    return NextResponse.json({ error: "PEDIMENTO_XML_INVALID" }, { status: 400 });
   }
 
   const operationId = text(incomingFormData.get("operation_id"));
@@ -64,11 +69,17 @@ export async function POST(request: Request) {
     (await createCustomsOperationIfNeeded({
       accessToken: auth.accessToken,
       broker: text(incomingFormData.get("broker")),
+      brokerPatent: text(incomingFormData.get("broker_patent")),
       companyId: auth.profile.companyId,
+      customsOffice: text(incomingFormData.get("customs_office")),
       customsReference: text(incomingFormData.get("customs_reference")),
+      importDate: text(incomingFormData.get("import_date")),
       importer: text(incomingFormData.get("importer")),
+      importerRfc: text(incomingFormData.get("importer_rfc")),
       operationId,
+      paymentDate: text(incomingFormData.get("payment_date")),
       pedimento: text(incomingFormData.get("pedimento")),
+      pedimentoXmlJson: text(incomingFormData.get("pedimento_xml_json")),
       userId: auth.user.id,
     })) ||
     operationId;
@@ -81,6 +92,39 @@ export async function POST(request: Request) {
   outboundFormData.append("engine_id", engineId);
   outboundFormData.append("company_id", auth.profile.companyId);
   outboundFormData.append("user_id", auth.user.id);
+
+  if (pedimentoXml instanceof File) {
+    outboundFormData.append("pedimento_xml", pedimentoXml, pedimentoXml.name);
+  }
+
+  for (const supportFile of incomingFormData.getAll("support_files")) {
+    if (supportFile instanceof File) {
+      outboundFormData.append("support_files", supportFile, supportFile.name);
+    }
+  }
+
+  for (const documentType of incomingFormData.getAll("support_document_types")) {
+    outboundFormData.append("support_document_types", text(documentType));
+  }
+
+  for (const metadataKey of [
+    "pedimento_number",
+    "customs_reference",
+    "importer",
+    "importer_rfc",
+    "broker",
+    "broker_patent",
+    "customs_office",
+    "import_date",
+    "payment_date",
+    "pedimento_xml_json",
+  ]) {
+    const value = text(incomingFormData.get(metadataKey));
+
+    if (value) {
+      outboundFormData.append(metadataKey, value);
+    }
+  }
 
   const auditResponse = await fetch(auditApiUrl, {
     body: outboundFormData,
@@ -216,20 +260,32 @@ async function persistAuditResult({
 async function createCustomsOperationIfNeeded({
   accessToken,
   broker,
+  brokerPatent,
   companyId,
+  customsOffice,
   customsReference,
+  importDate,
   importer,
+  importerRfc,
   operationId,
+  paymentDate,
   pedimento,
+  pedimentoXmlJson,
   userId,
 }: {
   accessToken: string;
   broker: string;
+  brokerPatent: string;
   companyId: string;
+  customsOffice: string;
   customsReference: string;
+  importDate: string;
   importer: string;
+  importerRfc: string;
   operationId: string;
+  paymentDate: string;
   pedimento: string;
+  pedimentoXmlJson: string;
   userId: string;
 }) {
   if (!operationId) {
@@ -255,6 +311,14 @@ async function createCustomsOperationIfNeeded({
         risk_score: 0,
         risk_score_average: 0,
         severity: "Low",
+        source_xml: {
+          broker_patent: brokerPatent,
+          customs_office: customsOffice,
+          import_date: importDate,
+          importer_rfc: importerRfc,
+          payment_date: paymentDate,
+          pedimento_xml: parseJson(pedimentoXmlJson),
+        },
       },
       operation_code: operationId,
       pedimento,
@@ -308,6 +372,23 @@ function number(value: unknown) {
 function isPdf(file: File) {
   const fileName = file.name.toLowerCase();
   return fileName.endsWith(".pdf") && (!file.type || file.type === "application/pdf" || file.type === "application/octet-stream");
+}
+
+function isXml(file: File) {
+  const fileName = file.name.toLowerCase();
+  return fileName.endsWith(".xml") || file.type === "application/xml" || file.type === "text/xml";
+}
+
+function parseJson(value: string) {
+  if (!value) {
+    return {};
+  }
+
+  try {
+    return (JSON.parse(value) as Record<string, unknown>) || {};
+  } catch {
+    return {};
+  }
 }
 
 function riskScore(result: NormalizedAuditResult) {
