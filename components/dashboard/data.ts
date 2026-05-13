@@ -18,79 +18,29 @@ export const stats: Stat[] = [
 
 export const menuSections: MenuSection[] = [
   {
-    title: "Normas de Gobierno",
+    title: "Plataforma",
     items: [
-      { label: "STPS" },
-      { label: "ASEA" },
-      { label: "Fiscal" },
-      { label: "SAT / CFF" },
-      { label: "Aduanal" },
-      { label: "Protección Civil" },
-    ],
-  },
-  {
-    title: "Empresas-Cliente",
-    items: [
-      { label: "PEMEX" },
-      { label: "Mexichem" },
-      { label: "Políticas internas" },
-      { label: "Anexos SSPA" },
-      { label: "Requisitos por cliente" },
-    ],
-  },
-  {
-    title: "Documentación Contratista",
-    items: [
-      { label: "Carga de documentos", href: "/dashboard/documentacion-contratista/carga" },
-      { label: "Expedientes", href: "#" },
-      { label: "Evidencias", href: "#" },
-      { label: "Historial documental", href: "#" },
-    ],
-  },
-  {
-    title: "Módulo de Auditoría",
-    items: [
-      { label: "Nueva auditoría", href: "/nueva-auditoria" },
+      { label: "Inicio", href: "/dashboard" },
       {
         label: "Customs Compliance",
         href: "/dashboard/customs-compliance",
-        description: "Auditoría de comercio exterior",
+        description: "Expedientes aduanales",
         engine: "CUSTOMS_COMPLIANCE",
       },
-      { label: "Matriz de cumplimiento" },
-      { label: "Reportes PDF" },
-      { label: "CSV / Exportaciones" },
-      { label: "Hallazgos" },
+      {
+        label: "STPS / PEMEX Compliance",
+        href: "/dashboard/stps-pemex-compliance",
+        description: "Auditoría documental HSE",
+        engine: "STPS_PEMEX_COMPLIANCE",
+      },
+      { label: "Executive Dashboard", href: "/" },
     ],
   },
   {
-    title: "Bitácora",
+    title: "Operación",
     items: [
-      { label: "Actividad reciente" },
-      { label: "Versionado documental" },
-      { label: "Eventos de usuario" },
-      { label: "Descargas" },
-      { label: "Trazabilidad" },
-    ],
-  },
-  {
-    title: "Usuarios y RBAC",
-    items: [
-      { label: "Super Admin" },
-      { label: "Compliance Manager" },
-      { label: "Auditor" },
-      { label: "Operación" },
-      { label: "Director" },
-    ],
-  },
-  {
-    title: "Configuración",
-    items: [
-      { label: "Catálogos" },
-      { label: "Riesgos soportados" },
-      { label: "Clientes" },
-      { label: "Branding" },
-      { label: "Integraciones" },
+      { label: "Reportes" },
+      { label: "Configuración" },
     ],
   },
 ];

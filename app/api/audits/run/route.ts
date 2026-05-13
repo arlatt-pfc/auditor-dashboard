@@ -59,7 +59,19 @@ export async function POST(request: Request) {
   }
 
   const operationId = text(incomingFormData.get("operation_id"));
-  const operationRecordId = text(incomingFormData.get("operation_record_id")) || operationId;
+  const operationRecordId =
+    text(incomingFormData.get("operation_record_id")) ||
+    (await createCustomsOperationIfNeeded({
+      accessToken: auth.accessToken,
+      broker: text(incomingFormData.get("broker")),
+      companyId: auth.profile.companyId,
+      customsReference: text(incomingFormData.get("customs_reference")),
+      importer: text(incomingFormData.get("importer")),
+      operationId,
+      pedimento: text(incomingFormData.get("pedimento")),
+      userId: auth.user.id,
+    })) ||
+    operationId;
   const auditTopic = text(incomingFormData.get("audit_topic")) || `Customs Compliance - ${operationId || file.name}`;
   const engineId = text(incomingFormData.get("engine_id")) || CUSTOMS_ENGINE_CODE;
 
@@ -199,6 +211,62 @@ async function persistAuditResult({
   );
 
   return Boolean(auditRun) && findingResults.every(Boolean);
+}
+
+async function createCustomsOperationIfNeeded({
+  accessToken,
+  broker,
+  companyId,
+  customsReference,
+  importer,
+  operationId,
+  pedimento,
+  userId,
+}: {
+  accessToken: string;
+  broker: string;
+  companyId: string;
+  customsReference: string;
+  importer: string;
+  operationId: string;
+  pedimento: string;
+  userId: string;
+}) {
+  if (!operationId) {
+    return "";
+  }
+
+  const row = await supabaseInsert<Record<string, unknown>>(
+    "customs_operations",
+    {
+      broker,
+      company_id: companyId,
+      created_by: userId,
+      customs_reference: customsReference,
+      dictamen: `Expediente aduanal ${operationId} creado desde el wizard de Customs Compliance.`,
+      framework: CUSTOMS_ENGINE_CODE,
+      importer,
+      metrics: {
+        audited_operations: 1,
+        broker_account_total: 0,
+        critical_findings: 0,
+        igi_paid: 0,
+        potential_recovery: 0,
+        risk_score: 0,
+        risk_score_average: 0,
+        severity: "Low",
+      },
+      operation_code: operationId,
+      pedimento,
+      provider: "",
+      recommendations: ["Ejecutar auditoria documental para generar dictamen y hallazgos."],
+    },
+    {
+      accessToken,
+    },
+  );
+
+  return text(row?.id);
 }
 
 function normalizeAuditResult(payload: AuditApiResponse | null): NormalizedAuditResult {

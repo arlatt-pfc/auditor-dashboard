@@ -1,16 +1,13 @@
 import Link from "next/link";
 import { connection } from "next/server";
 
-import { CustomsExecutiveSummary } from "@/components/dashboard/customs/CustomsExecutiveSummary";
-import { CustomsFindingsTable } from "@/components/dashboard/customs/CustomsFindingsTable";
 import { CustomsKpiGrid } from "@/components/dashboard/customs/CustomsKpiGrid";
 import { customsKpis, customsOperationMock, formatCurrency } from "@/components/dashboard/customs/mock-data";
 import { CustomsOperationsTable } from "@/components/dashboard/customs/CustomsOperationsTable";
-import { CustomsUploadForm } from "@/components/dashboard/customs/CustomsUploadForm";
 import { Header } from "@/components/dashboard/Header";
 import { PageShell } from "@/components/dashboard/PageShell";
 import { getAuthContext, userCanCreateEngine, userCanExecuteEngine, userCanReadEngine } from "@/lib/auth/session";
-import { getCustomsFindings, getCustomsOperations } from "@/lib/customs/supabase";
+import { getCustomsOperations } from "@/lib/customs/supabase";
 import type { CustomsOperation } from "@/lib/customs/types";
 import type { Stat } from "@/components/dashboard/types";
 
@@ -40,18 +37,7 @@ export default async function CustomsCompliancePage() {
   });
   const usesMockData = supabaseOperations.length === 0;
   const operations = usesMockData ? [customsOperationMock] : supabaseOperations;
-  const selectedOperation = operations[0] ?? customsOperationMock;
-  const supabaseFindings = usesMockData
-    ? customsOperationMock.findings
-    : await getCustomsFindings(selectedOperation.operationRecordId ?? selectedOperation.operationId, {
-        accessToken: auth?.accessToken,
-      });
-  const selectedFindings = supabaseFindings.length > 0 ? supabaseFindings : selectedOperation.findings;
-  const operation = {
-    ...selectedOperation,
-    findings: selectedFindings,
-  };
-  const kpis = usesMockData ? customsKpis : buildCustomsKpis(operations);
+  const kpis = usesMockData ? customsKpis.slice(0, 3) : buildCustomsKpis(operations);
 
   return (
     <PageShell currentPath={currentPath}>
@@ -63,13 +49,18 @@ export default async function CustomsCompliancePage() {
           <>
             <Link
               className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-              href="/"
+              href="/dashboard"
             >
-              Volver al dashboard
+              Volver al inicio
             </Link>
-            <span className="rounded-2xl bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700">
-              {usesMockData ? "Mock fallback" : "Supabase activo"}
-            </span>
+            {canManageCustoms ? (
+              <Link
+                className="rounded-2xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-slate-800"
+                href="/dashboard/customs-compliance/new"
+              >
+                Nuevo expediente aduanal
+              </Link>
+            ) : null}
           </>
         }
       />
@@ -77,35 +68,29 @@ export default async function CustomsCompliancePage() {
       <div className="mx-auto max-w-7xl space-y-6 px-6 py-8">
         <CustomsKpiGrid kpis={kpis} />
 
-        <section className="grid gap-6 xl:grid-cols-[1.45fr_0.9fr]">
-          <div className="space-y-6">
-            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <OperationMetric label="Expediente Aduanal" value={operation.operationId} />
-                <OperationMetric label="Pedimento" value={operation.pedimento} />
-                <OperationMetric label="Referencia Aduanal" value={operation.customsReference || "Sin referencia"} />
-                <OperationMetric label="Recuperacion" value={formatCurrency(operation.metrics.potentialRecovery)} />
-              </div>
-            </section>
-
-            <CustomsOperationsTable operations={operations} selectedOperationId={operation.operationId} />
-            <CustomsUploadForm canManage={canManageCustoms} operation={operation} />
-            <CustomsFindingsTable findings={operation.findings} />
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="text-xl font-semibold text-slate-900">Expedientes aduanales</h3>
+              <p className="mt-1 text-sm text-slate-500">
+                Consulta operaciones existentes o inicia un expediente nuevo para ejecutar la auditoria documental.
+              </p>
+            </div>
+            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+              {usesMockData ? "Mock fallback" : "Supabase activo"}
+            </span>
           </div>
-
-          <CustomsExecutiveSummary operation={operation} />
         </section>
+
+        <CustomsOperationsTable operations={operations} />
+
+        {!canManageCustoms ? (
+          <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
+            Tu rol permite consultar expedientes, pero no crear ni ejecutar auditorias de Customs Compliance.
+          </section>
+        ) : null}
       </div>
     </PageShell>
-  );
-}
-
-function OperationMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{label}</p>
-      <p className="mt-2 text-sm font-semibold text-slate-900">{value}</p>
-    </div>
   );
 }
 
@@ -140,11 +125,6 @@ function buildCustomsKpis(operations: CustomsOperation[]): Stat[] {
       label: "Hallazgos Criticos",
       value: String(totals.criticalFindings),
       hint: getRiskLabel(riskScoreAverage),
-    },
-    {
-      label: "Risk Score Promedio",
-      value: String(riskScoreAverage),
-      hint: "Promedio",
     },
   ];
 }

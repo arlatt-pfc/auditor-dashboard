@@ -1,9 +1,11 @@
+import Link from "next/link";
+
 import { formatCurrency } from "@/components/dashboard/customs/mock-data";
 import type { CustomsOperation } from "@/lib/customs/types";
 
 type CustomsOperationsTableProps = {
   operations: CustomsOperation[];
-  selectedOperationId: string;
+  selectedOperationId?: string;
 };
 
 export function CustomsOperationsTable({ operations, selectedOperationId }: CustomsOperationsTableProps) {
@@ -29,7 +31,8 @@ export function CustomsOperationsTable({ operations, selectedOperationId }: Cust
               <th className="pb-3 pr-4 font-medium">Agente Aduanal</th>
               <th className="pb-3 pr-4 font-medium">Contribuciones</th>
               <th className="pb-3 pr-4 font-medium">Recuperacion Potencial</th>
-              <th className="pb-3 font-medium">Score</th>
+              <th className="pb-3 pr-4 font-medium">Score</th>
+              <th className="pb-3 font-medium">Accion</th>
             </tr>
           </thead>
           <tbody>
@@ -53,6 +56,14 @@ export function CustomsOperationsTable({ operations, selectedOperationId }: Cust
                   <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
                     {operation.metrics.severity} {operation.metrics.riskScore}
                   </span>
+                </td>
+                <td className="py-4">
+                  <Link
+                    className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    href={`/dashboard/customs-compliance/${encodeURIComponent(operation.operationRecordId ?? operation.operationId)}`}
+                  >
+                    Ver detalle
+                  </Link>
                 </td>
               </tr>
             ))}

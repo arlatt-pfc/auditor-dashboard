@@ -17,8 +17,8 @@ export function Sidebar({ currentPath, menuSections, userContext, userEmail }: S
         <div className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-600">
           LOGÍSTICA DE DATOS
         </div>
-        <Link href="/" className="mt-2 block text-2xl font-bold text-slate-900">
-          Auditor AI
+        <Link href="/dashboard" className="mt-2 block text-2xl font-bold text-slate-900">
+          LDA Compliance
         </Link>
         <p className="mt-2 text-sm text-slate-500">
           Plataforma de auditoría documental y cumplimiento asistido por IA.
