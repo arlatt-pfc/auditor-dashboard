@@ -11,8 +11,10 @@ class AuditRunResponse(BaseModel):
 
 class PedimentoData(BaseModel):
     broker_name: str = ""
+    broker_person_name: str = ""
     broker_patent: str = ""
     commercial_value_usd: float | None = None
+    paid_commercial_value_mxn: float | None = None
     customs_office: str = ""
     customs_value_mxn: float | None = None
     dta_mxn: float | None = None
@@ -28,6 +30,7 @@ class PedimentoData(BaseModel):
     pedimento_number: str = ""
     prv_mxn: float | None = None
     coves: list[str] = Field(default_factory=list)
+    invoice_details: list[dict[str, str | float | None]] = Field(default_factory=list)
     invoices: list[str] = Field(default_factory=list)
     providers: list[str] = Field(default_factory=list)
     reference: str = ""
