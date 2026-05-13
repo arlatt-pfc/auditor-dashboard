@@ -37,6 +37,7 @@ export type AuthDebugState = {
   hasAuthCookie: boolean;
   nodeEnv: string;
   profileFound: boolean;
+  rbacQueriesUsedAuthenticatedJwt: boolean;
   supabaseAnonKeyConfigured: boolean;
   supabaseHost: string | null;
   supabaseUrlConfigured: boolean;
@@ -181,6 +182,7 @@ export async function getAuthDebugState(): Promise<AuthDebugState> {
     hasAuthCookie: Boolean(accessToken),
     nodeEnv: process.env.NODE_ENV,
     profileFound: tokenDebug?.profileFound ?? false,
+    rbacQueriesUsedAuthenticatedJwt: tokenDebug?.rbacQueriesUsedAuthenticatedJwt ?? false,
     supabaseAnonKeyConfigured: Boolean(SUPABASE_ANON_KEY),
     supabaseHost: getSupabaseHost(),
     supabaseUrlConfigured: Boolean(SUPABASE_URL),
