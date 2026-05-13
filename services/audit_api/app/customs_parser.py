@@ -169,7 +169,7 @@ def parse_pedimento_pdf(pdf_path: Path) -> PedimentoParseResponse:
         coves=coves,
         invoice_details=invoice_details,
         invoices=_unique([str(invoice["invoice_number"]) for invoice in invoice_details if invoice.get("invoice_number")]),
-        providers=_unique(match.group(1) for match in re.finditer(r"proveedor\s*[:.-]?\s*([A-Z0-9ÁÉÍÓÚÜÑ&.,/#\- ]{3,80})", normalized, re.I)),
+        providers=_providers_pdf(normalized),
         reference=_reference_value(normalized),
         tariff_items=_tariff_items_pdf(normalized),
         total_contributions_mxn=detected_total if detected_total is not None else _sum_numbers([igi, iva, dta, prv]),
@@ -305,10 +305,28 @@ def _confidence(data: PedimentoData, detected_fields: list[str]) -> int:
     remaining_fields = [field for field in detected_fields if field not in critical_weights and field != "operation_code"]
     score += min(10, len(remaining_fields))
 
+    if data.import_date and re.search(r"\b\d{1,2}/\d{1,2}/\d{4}\b", data.import_date):
+        score += 3
+
+    if data.payment_date and re.search(r"\b\d{1,2}/\d{1,2}/\d{4}\b", data.payment_date):
+        score += 3
+
+    if data.providers and all(_valid_provider_name(provider) for provider in data.providers):
+        score += 4
+
+    if data.paid_commercial_value_mxn is not None:
+        score += 3
+
+    if data.broker_person_name:
+        score += 3
+
+    if any(_invalid_tariff_item(item) for item in data.tariff_items):
+        score -= 5
+
     if data.invoice_details and "invoices" not in detected_fields:
         score += 5
 
-    return min(100, score)
+    return max(0, min(100, score))
 
 
 def _xml_root(xml: str) -> ET.Element | None:
@@ -374,10 +392,10 @@ def _label_value(text: str, labels: list[str]) -> str:
 
 def _date_value(text: str, labels: list[str]) -> str:
     for label in labels:
-        match = re.search(rf"{re.escape(label)}\s*[:.-]?\s*(\d{{1,2}}[/-]\d{{1,2}}[/-](?:\d{{2}}|\d{{4}}))", text, re.I)
+        match = re.search(rf"{re.escape(label)}\s*[:.-]?\s*(\d{{1,2}}[/-]\d{{1,2}}[/-](?:\d{{4}}|\d{{2}}))", text, re.I)
 
         if match:
-            return match.group(1)
+            return normalize_date(match.group(1), text)
 
     return ""
 
@@ -420,18 +438,50 @@ def _exchange_rate(text: str) -> str:
 
 def _pedimento_dates(text: str) -> tuple[str, str]:
     fechas_match = re.search(
-        r"\bFECHAS?\s+(\d{1,2}[/-]\d{1,2}[/-](?:\d{2}|\d{4}))\s+(\d{1,2}[/-]\d{1,2}[/-](?:\d{2}|\d{4}))\s+ENTRADA\s+PAGO\b",
+        r"\bFECHAS?\s+(\d{1,2}[/-]\d{1,2}[/-](?:\d{4}|\d{2}))\s+(\d{1,2}[/-]\d{1,2}[/-](?:\d{4}|\d{2}))\s+ENTRADA\s+PAGO\b",
         text,
         re.I,
     )
 
     if fechas_match:
-        return fechas_match.group(1), fechas_match.group(2)
+        return normalize_date(fechas_match.group(1), text), normalize_date(fechas_match.group(2), text)
+
+    fechas_block = re.search(
+        r"\bFECHAS?\b\s*(?:ENTRADA\s+PAGO\s*)?(\d{1,2}[/-]\d{1,2}[/-](?:\d{4}|\d{2}))\s+(\d{1,2}[/-]\d{1,2}[/-](?:\d{4}|\d{2}))",
+        text,
+        re.I,
+    )
+
+    if fechas_block:
+        return normalize_date(fechas_block.group(1), text), normalize_date(fechas_block.group(2), text)
 
     import_date = _date_value(text, ["entrada", "fecha de entrada", "fecha importacion", "fecha de importacion"])
     payment_date = _date_value(text, ["pago", "fecha de pago"])
 
     return import_date, payment_date
+
+
+def normalize_date(value: str, context_text: str | None = None) -> str:
+    match = re.search(r"\b(\d{1,2})([/-])(\d{1,2})[/-](\d{4}|\d{2})\b", value)
+
+    if not match:
+        return value
+
+    day, separator, month, year = match.group(1), match.group(2), match.group(3), match.group(4)
+
+    if len(year) == 4:
+        return f"{day.zfill(2)}{separator}{month.zfill(2)}{separator}{year}"
+
+    context = context_text or ""
+    same_day_month = re.search(rf"\b{int(day):02d}[/-]{int(month):02d}[/-]((?:19|20)\d{{2}})\b", context)
+
+    if same_day_month:
+        return f"{day.zfill(2)}{separator}{month.zfill(2)}{separator}{same_day_month.group(1)}"
+
+    years = [int(year_match.group(1)) for year_match in re.finditer(r"\b((?:19|20)\d{2})\b", context)]
+    resolved_year = str(max(years)) if years else f"20{year}"
+
+    return f"{day.zfill(2)}{separator}{month.zfill(2)}{separator}{resolved_year}"
 
 
 def _importer_name_pdf(text: str) -> str:
@@ -597,6 +647,55 @@ def _paid_commercial_value_mxn_pdf(text: str) -> float | None:
     return values_block.get("paid_commercial_value_mxn")
 
 
+def _providers_pdf(text: str) -> list[str]:
+    known_provider = re.search(r"\b(MHWIRTH\s+LLC)\b", text, re.I)
+    providers: list[str] = []
+
+    if known_provider:
+        providers.append(known_provider.group(1))
+
+    provider_block = re.search(r"DATOS\s+DEL\s+PROVEEDOR\s+O\s+COMPRADOR(.{0,700})", text, re.I)
+
+    if provider_block:
+        block = provider_block.group(1)
+        for match in re.finditer(r"\b[A-Z0-9]{2,}-[A-Z0-9]{2,}\s+([A-ZÁÉÍÓÚÜÑ&.,\s]+?)(?=\s+(?:[A-Z]{2,}\s+)?(?:VINCULACION|NO\s+VINCULACION|DOMICILIO|CALLE|AV\.|BLVD\.|\d{2,}|VAL\.|FACTURA)\b)", block, re.I):
+            candidate = _clean_provider_candidate(match.group(1))
+
+            if candidate:
+                providers.append(candidate)
+
+    for match in re.finditer(r"proveedor\s*[:.-]?\s*([A-Z0-9ÁÉÍÓÚÜÑ&.,/#\- ]{3,80})", text, re.I):
+        candidate = _clean_provider_candidate(match.group(1))
+
+        if candidate:
+            providers.append(candidate)
+
+    return _unique(provider for provider in providers if _valid_provider_name(provider))
+
+
+def _clean_provider_candidate(value: str) -> str:
+    cleaned = _normalize_text(value)
+    cleaned = re.sub(
+        r"\b(?:DATOS\s+DEL\s+PROVEEDOR\s+O\s+COMPRADOR|ID\.?\s+FISCAL|NOMBRE|DENOMINACION|RAZON\s+SOCIAL|DOMICILIO|VINCULACION|O\s+COMPRADOR|IMPORTE)\b",
+        " ",
+        cleaned,
+        flags=re.I,
+    )
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" .-/")
+    match = re.search(r"\b([A-ZÁÉÍÓÚÜÑ&.\s]{3,}?(?:LLC|INC|LTD|CORP|SA\s+DE\s+CV|S\.A\.\s+DE\s+C\.V\.))\b", cleaned, re.I)
+    return _clean_party_capture(match.group(1) if match else cleaned)
+
+
+def _valid_provider_name(value: str) -> bool:
+    if not value:
+        return False
+
+    if re.search(r"\b(DATOS|PROVEEDOR|COMPRADOR|ID\.?\s+FISCAL|NOMBRE|DENOMINACION|RAZON\s+SOCIAL|DOMICILIO|VINCULACION|IMPORTE)\b", value, re.I):
+        return False
+
+    return bool(re.search(r"[A-ZÁÉÍÓÚÜÑ]", value, re.I) and len(value) >= 3)
+
+
 def _money_from_labeled_number(text: str, labels: list[str]) -> float | None:
     for label in labels:
         match = re.search(rf"\b{label}\s*[:.-]?\s*([$]?[\d,]+(?:\.\d+)?)\b", text, re.I)
@@ -678,7 +777,7 @@ def _invoice_details_pdf(text: str) -> list[dict[str, str | float | None]]:
         details.append(
             {
                 "invoice_number": match.group(1),
-                "date": match.group(2),
+                "date": normalize_date(match.group(2), text),
                 "incoterm": match.group(3).upper(),
                 "currency": match.group(4).upper(),
                 "amount": _money(match.group(5)),
@@ -715,8 +814,28 @@ def _coves_pdf(text: str) -> list[str]:
 
 def _tariff_items_pdf(text: str) -> list[str]:
     labeled = [match.group(1) for match in re.finditer(r"fracci[oó]n(?:\s+arancelaria)?\s*[:.-]?\s*(\d{8})", text, re.I)]
-    fallback = [match.group(0) for match in re.finditer(r"\b\d{8}\b", text)]
-    return _unique([*labeled, *fallback])[:100]
+    contextual = [
+        match.group(1)
+        for match in re.finditer(
+            r"\b(?:UMC|UMT|P\.?\s*V/?C|VAL(?:OR)?\s+AGREG|SEC|FRACCION)\b.{0,90}\b(\d{8})\b",
+            text,
+            re.I,
+        )
+    ]
+    invoice_numbers = {str(invoice["invoice_number"]) for invoice in _invoice_details_pdf(text) if invoice.get("invoice_number")}
+    fallback = [match.group(0) for match in re.finditer(r"\b\d{8}\b", text) if match.group(0) not in invoice_numbers]
+    values = [value for value in [*labeled, *contextual, *fallback] if _valid_tariff_item(value)]
+    return _unique(values)[:100]
+
+
+def _valid_tariff_item(value: str) -> bool:
+    digits = re.sub(r"\D", "", value)
+    return bool(re.fullmatch(r"\d{8}", digits) and not _invalid_tariff_item(digits))
+
+
+def _invalid_tariff_item(value: str) -> bool:
+    digits = re.sub(r"\D", "", value)
+    return not digits or set(digits) == {"0"}
 
 
 def _money(value: str) -> float | None:

@@ -7,12 +7,14 @@ import type { CustomsDocumentType } from "@/lib/customs/types";
 
 type PedimentoXmlData = {
   broker_name: string;
+  broker_person_name: string;
   broker_patent: string;
   commercial_value_usd: number | null;
+  paid_commercial_value_mxn: number | null;
   customs_office: string;
   customs_value_mxn: number | null;
   dta_mxn: number | null;
-  exchange_rate: number | null;
+  exchange_rate: number | string | null;
   igi_mxn: number | null;
   import_date: string;
   importer_name: string;
@@ -24,11 +26,23 @@ type PedimentoXmlData = {
   pedimento_number: string;
   prv_mxn: number | null;
   coves: string[];
+  invoice_details: InvoiceDetail[];
   invoices: string[];
   providers: string[];
   reference: string;
   tariff_items: string[];
   total_contributions_mxn: number | null;
+};
+
+type InvoiceDetail = {
+  amount?: number | null;
+  cove?: string;
+  currency?: string;
+  date?: string;
+  exchange_factor?: string;
+  incoterm?: string;
+  invoice_number?: string;
+  usd_value?: number | null;
 };
 
 type BaseDocumentKind = "xml_pedimento" | "pdf_pedimento" | "cfdi_invalid" | "";
@@ -77,8 +91,10 @@ type AuditResult = {
 
 const emptyXmlData: PedimentoXmlData = {
   broker_name: "",
+  broker_person_name: "",
   broker_patent: "",
   commercial_value_usd: null,
+  paid_commercial_value_mxn: null,
   customs_office: "",
   customs_value_mxn: null,
   dta_mxn: null,
@@ -94,6 +110,7 @@ const emptyXmlData: PedimentoXmlData = {
   pedimento_number: "",
   prv_mxn: null,
   coves: [],
+  invoice_details: [],
   invoices: [],
   providers: [],
   reference: "",
@@ -126,13 +143,15 @@ const detectedFieldLabels: { key: keyof PedimentoXmlData; label: string; numeric
   { key: "importer_name", label: "Importador" },
   { key: "importer_rfc", label: "RFC importador" },
   { key: "broker_name", label: "Agente aduanal" },
+  { key: "broker_person_name", label: "Agente responsable" },
   { key: "broker_patent", label: "Patente agente" },
   { key: "customs_office", label: "Aduana" },
   { key: "import_date", label: "Fecha importación" },
   { key: "payment_date", label: "Fecha pago" },
   { key: "exchange_rate", label: "Tipo de cambio", numeric: true },
   { key: "customs_value_mxn", label: "Valor aduana MXN", numeric: true },
-  { key: "commercial_value_usd", label: "Valor comercial USD", numeric: true },
+  { key: "commercial_value_usd", label: "Valor en dólares", numeric: true },
+  { key: "paid_commercial_value_mxn", label: "Precio pagado / Valor comercial MXN", numeric: true },
   { key: "igi_mxn", label: "IGI MXN", numeric: true },
   { key: "iva_mxn", label: "IVA MXN", numeric: true },
   { key: "dta_mxn", label: "DTA MXN", numeric: true },
@@ -268,7 +287,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     setXmlData((current) => {
       const next = {
         ...current,
-        [key]: arrayKey(key) ? value.split(",").map((item) => item.trim()).filter(Boolean) : numericKey(key) ? numberOrNull(value) : value,
+        [key]: arrayKey(key) ? splitList(value) : numericKey(key) ? numberOrNull(value) : value,
       };
 
       if (key === "pedimento_number" || key === "import_date") {
@@ -511,13 +530,23 @@ function XmlStep({
 
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           {detectedFieldLabels.map((field) => (
-            <TextField
-              key={field.key}
-              label={field.label}
-              missing={parseResult ? parseResult.missing_fields.includes(field.key) : false}
-              onChange={(value) => onChange(field.key, value)}
-              value={stringValue(data[field.key])}
-            />
+            longTextKey(field.key) ? (
+              <TextAreaField
+                key={field.key}
+                label={field.label}
+                missing={parseResult ? parseResult.missing_fields.includes(field.key) : false}
+                onChange={(value) => onChange(field.key, value)}
+                value={stringValue(data[field.key])}
+              />
+            ) : (
+              <TextField
+                key={field.key}
+                label={field.label}
+                missing={parseResult ? parseResult.missing_fields.includes(field.key) : false}
+                onChange={(value) => onChange(field.key, value)}
+                value={stringValue(data[field.key])}
+              />
+            )
           ))}
           <label className="block md:col-span-2">
             <span className="text-sm font-semibold text-slate-700">Fracciones arancelarias</span>
@@ -527,9 +556,10 @@ function XmlStep({
               value={data.tariff_items.join(", ")}
             />
           </label>
-          <ArrayTextField label="Proveedores detectados" onChange={(value) => onChange("providers", value)} value={data.providers.join(", ")} />
-          <ArrayTextField label="Facturas detectadas" onChange={(value) => onChange("invoices", value)} value={data.invoices.join(", ")} />
-          <ArrayTextField label="COVEs detectados" onChange={(value) => onChange("coves", value)} value={data.coves.join(", ")} />
+          <ArrayTextAreaField label="Proveedores detectados" onChange={(value) => onChange("providers", value)} value={data.providers.join("\n")} />
+          <ArrayTextAreaField label="Facturas detectadas" onChange={(value) => onChange("invoices", value)} value={data.invoices.join("\n")} />
+          <ArrayTextAreaField label="COVEs detectados" onChange={(value) => onChange("coves", value)} value={data.coves.join("\n")} />
+          {data.invoice_details.length > 0 ? <InvoiceDetailsTable invoices={data.invoice_details} /> : null}
         </div>
       </div>
     </div>
@@ -688,16 +718,78 @@ function TextField({
   );
 }
 
-function ArrayTextField({ label, onChange, value }: { label: string; onChange: (value: string) => void; value: string }) {
+function TextAreaField({
+  label,
+  missing,
+  onChange,
+  value,
+}: {
+  label: string;
+  missing?: boolean;
+  onChange: (value: string) => void;
+  value: string;
+}) {
   return (
-    <label className="block">
-      <span className="text-sm font-semibold text-slate-700">{label}</span>
-      <input
-        className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+    <label className="block md:col-span-2">
+      <span className="flex items-center justify-between gap-3 text-sm font-semibold text-slate-700">
+        {label}
+        {missing ? <span className="text-xs font-medium text-amber-600">Faltante</span> : null}
+      </span>
+      <textarea
+        className="mt-2 min-h-20 w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
         onChange={(event) => onChange(event.target.value)}
         value={value}
       />
     </label>
+  );
+}
+
+function ArrayTextAreaField({ label, onChange, value }: { label: string; onChange: (value: string) => void; value: string }) {
+  return (
+    <label className="block">
+      <span className="text-sm font-semibold text-slate-700">{label}</span>
+      <textarea
+        className="mt-2 min-h-24 w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+        onChange={(event) => onChange(event.target.value)}
+        value={value}
+      />
+    </label>
+  );
+}
+
+function InvoiceDetailsTable({ invoices }: { invoices: InvoiceDetail[] }) {
+  return (
+    <div className="md:col-span-2">
+      <p className="text-sm font-semibold text-slate-700">Detalle de facturas</p>
+      <div className="mt-2 overflow-x-auto rounded-2xl border border-slate-200">
+        <table className="min-w-full divide-y divide-slate-200 text-sm">
+          <thead className="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
+            <tr>
+              <th className="px-3 py-2">Factura</th>
+              <th className="px-3 py-2">Fecha</th>
+              <th className="px-3 py-2">Incoterm</th>
+              <th className="px-3 py-2">Moneda</th>
+              <th className="px-3 py-2">Importe</th>
+              <th className="px-3 py-2">Valor USD</th>
+              <th className="px-3 py-2">COVE</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
+            {invoices.map((invoice, index) => (
+              <tr key={`${invoice.invoice_number ?? "invoice"}-${index}`}>
+                <td className="px-3 py-2 font-medium text-slate-900">{invoice.invoice_number}</td>
+                <td className="px-3 py-2">{invoice.date}</td>
+                <td className="px-3 py-2">{invoice.incoterm}</td>
+                <td className="px-3 py-2">{invoice.currency}</td>
+                <td className="px-3 py-2">{simpleStringValue(invoice.amount ?? null)}</td>
+                <td className="px-3 py-2">{simpleStringValue(invoice.usd_value ?? null)}</td>
+                <td className="px-3 py-2">{invoice.cove}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
@@ -718,9 +810,20 @@ function arrayKey(key: keyof PedimentoXmlData) {
   return key === "tariff_items" || key === "providers" || key === "invoices" || key === "coves";
 }
 
+function longTextKey(key: keyof PedimentoXmlData) {
+  return key === "importer_name";
+}
+
 function numberOrNull(value: string) {
   const parsed = Number(value.replace(/[$,\s]/g, ""));
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function splitList(value: string) {
+  return value
+    .split(/[,\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function stringValue(value: PedimentoXmlData[keyof PedimentoXmlData]) {
@@ -728,6 +831,10 @@ function stringValue(value: PedimentoXmlData[keyof PedimentoXmlData]) {
     return value.join(", ");
   }
 
+  return value === null ? "" : String(value);
+}
+
+function simpleStringValue(value: number | string | null) {
   return value === null ? "" : String(value);
 }
 
