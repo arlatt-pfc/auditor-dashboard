@@ -40,6 +40,24 @@ type ParseResponse = {
   missing_fields: string[];
 };
 
+type RemoteParseResponse = {
+  confidence: number;
+  data: PedimentoXmlData;
+  detected_fields: string[];
+  document_type: string;
+  error_code?: string;
+  is_supported_as_primary_document: boolean;
+  is_supported_as_primary_xml?: boolean;
+  missing_fields: string[];
+  user_message?: string;
+  warning?: string;
+};
+
+type ParseError = {
+  code: string;
+  message: string;
+};
+
 type SupportDocumentType = CustomsDocumentType | "forwarding_invoice";
 
 type DocumentSlot = {
@@ -136,6 +154,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
   const [baseDocumentKind, setBaseDocumentKind] = useState<BaseDocumentKind>("");
   const [xmlData, setXmlData] = useState<PedimentoXmlData>(emptyXmlData);
   const [parseResult, setParseResult] = useState<ParseResponse | null>(null);
+  const [parseError, setParseError] = useState<ParseError | null>(null);
   const [isParsing, setIsParsing] = useState(false);
   const [files, setFiles] = useState<Partial<Record<SupportDocumentType, File>>>({});
   const [error, setError] = useState("");
@@ -156,52 +175,40 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     [files],
   );
 
-  async function parseBaseDocument(file?: File) {
+  function selectBaseDocument(file?: File) {
     if (!file) {
       return;
     }
 
     setBaseFile(file);
+    setBaseDocumentKind("");
+    setError("");
+    setParseResult(null);
+    setParseError(null);
+    setResult(null);
+  }
+
+  async function extractBaseDocument() {
+    if (!baseFile) {
+      setParseError({
+        code: "PEDIMENTO_FILE_REQUIRED",
+        message: "Selecciona un XML o PDF del pedimento antes de extraer datos.",
+      });
+      return;
+    }
+
     setIsParsing(true);
     setError("");
     setParseResult(null);
-
-    if (isXmlFile(file)) {
-      const xml = await file.text().catch(() => "");
-
-      if (isCfdiXml(xml)) {
-        setIsParsing(false);
-        setBaseDocumentKind("cfdi_invalid");
-        setXmlData(emptyXmlData);
-        setError("Este XML parece ser un CFDI. Para el paso 1 carga el XML del pedimento o el PDF del pedimento.");
-        return;
-      }
-
-      setBaseDocumentKind("xml_pedimento");
-      await parseDocument(file, "/api/customs/parse-pedimento-xml", "No se pudo leer el XML del pedimento.");
-      return;
-    }
-
-    if (isPdfFile(file)) {
-      setBaseDocumentKind("pdf_pedimento");
-      setFiles((current) => ({
-        ...current,
-        pedimento: file,
-      }));
-      await parseDocument(file, "/api/customs/parse-pedimento-pdf", "No se pudo leer el PDF del pedimento.");
-      return;
-    }
-
-    setIsParsing(false);
-    setBaseDocumentKind("");
-    setError("Carga un archivo XML o PDF de pedimento.");
+    setParseError(null);
+    await parseDocument(baseFile);
   }
 
-  async function parseDocument(file: File, endpoint: string, fallbackError: string) {
+  async function parseDocument(file: File) {
     const formData = new FormData();
     formData.append("file", file, file.name);
 
-    const response = await fetch(endpoint, {
+    const response = await fetch("/api/customs/parse-pedimento", {
       body: formData,
       method: "POST",
     }).catch(() => null);
@@ -209,14 +216,52 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     setIsParsing(false);
 
     if (!response?.ok) {
-      const payload = (await response?.json().catch(() => null)) as { error?: string } | null;
-      setError(payload?.error ?? fallbackError);
+      const payload = (await response?.json().catch(() => null)) as { document_type?: string; error?: string; error_code?: string; user_message?: string } | null;
+      const code = payload?.error_code ?? payload?.error ?? "PARSE_FAILED";
+      setBaseDocumentKind(kindFromDocumentType(payload?.document_type));
+      setParseError({
+        code,
+        message: payload?.user_message || parsingErrorMessage(code),
+      });
       return;
     }
 
-    const payload = (await response.json()) as ParseResponse;
-    setParseResult(payload);
-    setXmlData(payload.detected);
+    const payload = (await response.json()) as RemoteParseResponse;
+    const documentKind = kindFromDocumentType(payload.document_type);
+    setBaseDocumentKind(documentKind);
+
+    if (documentKind === "pdf_pedimento") {
+      setFiles((current) => ({
+        ...current,
+        pedimento: file,
+      }));
+    }
+
+    if (!payload.is_supported_as_primary_document) {
+      setXmlData(emptyXmlData);
+      setParseError({
+        code: payload.error_code || payload.document_type || "UNSUPPORTED_BASE_DOCUMENT",
+        message: payload.user_message || payload.warning || "El documento no es válido como pedimento base.",
+      });
+      return;
+    }
+
+    const parseResultPayload = {
+      confidence: payload.confidence,
+      detected: payload.data,
+      detected_fields: payload.detected_fields,
+      missing_fields: payload.missing_fields,
+    };
+
+    setParseResult(parseResultPayload);
+    setXmlData(payload.data);
+
+    if (payload.warning || payload.user_message) {
+      setParseError({
+        code: payload.error_code || "REMOTE_PARSE_WARNING",
+        message: payload.user_message || payload.warning || "",
+      });
+    }
   }
 
   function updateXmlData(key: keyof PedimentoXmlData, value: string) {
@@ -235,6 +280,12 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
 
       return next;
     });
+    setError("");
+  }
+
+  function useManualCapture() {
+    setParseError(null);
+    setParseResult(null);
     setError("");
   }
 
@@ -327,7 +378,10 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
             fileName={baseFile?.name}
             isParsing={isParsing}
             onChange={updateXmlData}
-            onFileChange={parseBaseDocument}
+            onExtract={extractBaseDocument}
+            onFileChange={selectBaseDocument}
+            onManualCapture={useManualCapture}
+            parseError={parseError}
             parseResult={parseResult}
           />
         ) : null}
@@ -380,7 +434,10 @@ function XmlStep({
   fileName,
   isParsing,
   onChange,
+  onExtract,
   onFileChange,
+  onManualCapture,
+  parseError,
   parseResult,
 }: {
   baseDocumentKind: BaseDocumentKind;
@@ -388,7 +445,10 @@ function XmlStep({
   fileName?: string;
   isParsing: boolean;
   onChange: (key: keyof PedimentoXmlData, value: string) => void;
+  onExtract: () => void;
   onFileChange: (file?: File) => void;
+  onManualCapture: () => void;
+  parseError: ParseError | null;
   parseResult: ParseResponse | null;
 }) {
   const missingCount = parseResult?.missing_fields.length ?? 0;
@@ -410,6 +470,17 @@ function XmlStep({
         />
         <span className="mt-3 block text-xs text-slate-500">{isParsing ? "Leyendo documento..." : fileName ?? "Pendiente de carga"}</span>
       </label>
+
+      <button
+        className="mt-4 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+        disabled={!fileName || isParsing}
+        onClick={onExtract}
+        type="button"
+      >
+        {isParsing ? "Extrayendo datos..." : "Extraer datos del pedimento"}
+      </button>
+
+      {parseError ? <ParseErrorCard error={parseError} onManualCapture={onManualCapture} /> : null}
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
@@ -461,6 +532,26 @@ function XmlStep({
           <ArrayTextField label="COVEs detectados" onChange={(value) => onChange("coves", value)} value={data.coves.join(", ")} />
         </div>
       </div>
+    </div>
+  );
+}
+
+function ParseErrorCard({ error, onManualCapture }: { error: ParseError; onManualCapture: () => void }) {
+  const isWarning = error.code === "CFDI_INVALID_FOR_STEP_1";
+
+  return (
+    <div className={`mt-4 rounded-2xl border p-4 ${isWarning ? "border-amber-200 bg-amber-50" : "border-red-200 bg-red-50"}`}>
+      <p className={`text-sm font-semibold ${isWarning ? "text-amber-900" : "text-red-900"}`}>No se pudo procesar el documento base</p>
+      <p className={`mt-2 text-sm leading-6 ${isWarning ? "text-amber-800" : "text-red-800"}`}>{error.message}</p>
+      {!isWarning ? (
+        <button
+          className="mt-3 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          onClick={onManualCapture}
+          type="button"
+        >
+          Usar captura manual
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -648,16 +739,40 @@ function operationCodeFromPedimento(pedimentoNumber: string, importDate: string)
   return digits ? `IMP-${year}-${digits}` : "";
 }
 
-function isXmlFile(file: File) {
-  const fileName = file.name.toLowerCase();
-  return fileName.endsWith(".xml") || file.type === "application/xml" || file.type === "text/xml";
+function parsingErrorMessage(code: string) {
+  if (code === "PDF_TEXT_NOT_EXTRACTABLE") {
+    return "No fue posible extraer texto del PDF. El archivo puede estar escaneado o usar una codificación no compatible. Puedes cargar el XML del pedimento, capturar los datos manualmente o continuar adjuntando el PDF como soporte.";
+  }
+
+  if (code === "PEDIMENTO_FILE_MUST_BE_PDF_OR_XML") {
+    return "Carga un archivo XML o PDF de pedimento.";
+  }
+
+  if (code === "AUDIT_API_NOT_CONFIGURED") {
+    return "El servicio externo de parsing no está configurado.";
+  }
+
+  if (code === "AUDIT_API_UNREACHABLE") {
+    return "No se pudo conectar con el servicio externo de parsing.";
+  }
+
+  return "No se pudo extraer información del pedimento.";
 }
 
-function isPdfFile(file: File) {
-  const fileName = file.name.toLowerCase();
-  return fileName.endsWith(".pdf") || file.type === "application/pdf";
-}
+function kindFromDocumentType(documentType?: string): BaseDocumentKind {
+  const normalized = documentType?.toUpperCase() ?? "";
 
-function isCfdiXml(xml: string) {
-  return /<(?:[\w.-]+:)?Comprobante\b/i.test(xml) && /\b(?:[\w.-]+:)?Emisor\b|\b(?:[\w.-]+:)?Receptor\b/i.test(xml);
+  if (normalized === "XML_PEDIMENTO" || normalized === "PEDIMENTO_XML") {
+    return "xml_pedimento";
+  }
+
+  if (normalized === "PDF_PEDIMENTO" || normalized === "PEDIMENTO_PDF") {
+    return "pdf_pedimento";
+  }
+
+  if (normalized === "CFDI" || normalized === "CFDI_XML") {
+    return "cfdi_invalid";
+  }
+
+  return "";
 }

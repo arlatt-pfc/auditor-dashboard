@@ -4,6 +4,8 @@ import { NextResponse } from "next/server";
 
 import { getAuthContext, userCanReadEngine } from "@/lib/auth/session";
 
+// Legacy local parser. New wizard flow uses /api/customs/parse-pedimento,
+// which proxies parsing to the audit API service on the VPS.
 type PedimentoPdfData = {
   broker_name: string;
   broker_patent: string;
@@ -46,25 +48,25 @@ export async function POST(request: Request) {
   const formData = await request.formData().catch(() => null);
 
   if (!formData) {
-    return NextResponse.json({ error: "INVALID_MULTIPART_FORM_DATA" }, { status: 400 });
+    return errorResponse("INVALID_MULTIPART_FORM_DATA", 400);
   }
 
   const file = formData.get("file");
 
   if (!(file instanceof File) || !isPdf(file)) {
-    return NextResponse.json({ error: "PDF_FILE_REQUIRED" }, { status: 400 });
+    return errorResponse("PDF_FILE_REQUIRED", 400);
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
 
   if (!buffer.subarray(0, 8).toString("latin1").includes("%PDF")) {
-    return NextResponse.json({ error: "PDF_INVALID" }, { status: 400 });
+    return errorResponse("PDF_INVALID", 400);
   }
 
   const text = extractPdfText(buffer);
 
   if (!text.trim()) {
-    return NextResponse.json({ error: "PDF_TEXT_NOT_EXTRACTABLE" }, { status: 422 });
+    return errorResponse("PDF_TEXT_NOT_EXTRACTABLE", 422);
   }
 
   const data = parsePedimentoPdf(text);
@@ -79,6 +81,10 @@ export async function POST(request: Request) {
     detected_fields: detectedFields,
     missing_fields: missingFields,
   });
+}
+
+function errorResponse(code: string, status: number) {
+  return NextResponse.json({ error: code, error_code: code }, { status });
 }
 
 function parsePedimentoPdf(text: string): PedimentoPdfData {

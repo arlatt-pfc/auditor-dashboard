@@ -4,6 +4,7 @@ FastAPI wrapper for the operational audit pipeline. It exposes:
 
 ```text
 POST /audit/run
+POST /customs/parse-pedimento
 ```
 
 The endpoint accepts one PDF plus metadata:
@@ -20,6 +21,34 @@ It stores the upload in a temporary working directory, executes `run_full_audit.
 - `executive_dictamen`
 - `top_critical_gaps`
 - `report_pdf_url`
+
+## Customs Pedimento Parsing
+
+`POST /customs/parse-pedimento` accepts one multipart `file` containing either:
+
+- XML del pedimento
+- PDF del pedimento
+
+It returns normalized JSON for the dashboard wizard:
+
+- `document_type`
+- `is_supported_as_primary_xml`
+- `is_supported_as_primary_document`
+- `confidence`
+- `user_message`
+- `detected_fields`
+- `missing_fields`
+- `data`
+- `error_code`
+- `warning`
+
+For PDFs, the service first tries `pdftotext` from Poppler and falls back to a lightweight Python extractor. Install Poppler on Ubuntu:
+
+```bash
+sudo apt install poppler-utils -y
+```
+
+If neither strategy extracts enough text, the endpoint returns `PDF_TEXT_NOT_EXTRACTABLE`.
 
 ## Environment
 
@@ -67,5 +96,9 @@ Point the Next.js app to:
 
 ```bash
 AUDITOR_PIPELINE_URL=https://your-domain.example/audit/run
+AUDIT_API_BASE_URL=https://your-domain.example
+AUDIT_API_URL=https://your-domain.example/audit/run
+AUDIT_API_KEY=shared-secret
 ```
 
+`AUDIT_API_BASE_URL` is preferred for dashboard customs parsing. If it is not present, the Next.js proxy derives the base origin from `AUDIT_API_URL`.

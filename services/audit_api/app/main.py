@@ -3,10 +3,12 @@ from uuid import uuid4
 import shutil
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile, status
+from fastapi.responses import JSONResponse
 
 from .config import Settings, get_settings
+from .customs_parser import parse_uploaded_pedimento
 from .pipeline_runner import PipelineExecutionError, run_pipeline
-from .schemas import AuditRunResponse
+from .schemas import AuditRunResponse, PedimentoParseResponse
 
 app = FastAPI(title="LDA Audit API", version="0.1.0")
 
@@ -53,6 +55,38 @@ async def run_audit(
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
+@app.post("/customs/parse-pedimento", response_model=PedimentoParseResponse)
+async def parse_pedimento(
+    file: UploadFile = File(...),
+    authorization: str | None = Header(default=None),
+    settings: Settings = Depends(get_settings),
+) -> PedimentoParseResponse | JSONResponse:
+    _authorize_request(settings, authorization)
+
+    request_id = str(uuid4())
+    work_dir = settings.tmp_dir / "customs-parse" / request_id
+    work_dir.mkdir(parents=True, exist_ok=False)
+
+    try:
+        payload = await file.read()
+
+        if not payload:
+            return _customs_error("PEDIMENTO_FILE_EMPTY", status.HTTP_400_BAD_REQUEST, "El archivo de pedimento está vacío.")
+
+        result = parse_uploaded_pedimento(file.filename or "pedimento", file.content_type, payload, work_dir)
+
+        if result.error_code == "PDF_TEXT_NOT_EXTRACTABLE":
+            return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content=result.model_dump())
+
+        if result.error_code and not result.is_supported_as_primary_document:
+            status_code = status.HTTP_200_OK if result.document_type == "CFDI" else status.HTTP_400_BAD_REQUEST
+            return JSONResponse(status_code=status_code, content=result.model_dump())
+
+        return result
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
 def _authorize_request(settings: Settings, authorization: str | None) -> None:
     if not settings.api_key:
         return
@@ -75,3 +109,20 @@ def _safe_pdf_name(filename: str) -> str:
     safe = "".join(character if character.isalnum() or character in "._-" else "_" for character in filename)
     return safe if safe.lower().endswith(".pdf") else f"{safe}.pdf"
 
+
+def _customs_error(code: str, status_code: int, message: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "confidence": 0,
+            "data": {},
+            "detected_fields": [],
+            "document_type": "UNSUPPORTED",
+            "error": code,
+            "error_code": code,
+            "is_supported_as_primary_document": False,
+            "is_supported_as_primary_xml": False,
+            "missing_fields": [],
+            "user_message": message,
+        },
+    )

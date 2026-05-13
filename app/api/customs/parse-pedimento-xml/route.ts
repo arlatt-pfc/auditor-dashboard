@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 
 import { getAuthContext, userCanReadEngine } from "@/lib/auth/session";
 
+// Legacy local parser. New wizard flow uses /api/customs/parse-pedimento,
+// which proxies parsing to the audit API service on the VPS.
 type PedimentoXmlData = {
   broker_name: string;
   broker_patent: string;
