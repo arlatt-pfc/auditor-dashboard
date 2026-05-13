@@ -189,6 +189,7 @@ export async function getAuthDebugState(): Promise<AuthDebugState> {
 
 export async function getTokenDebugState(accessToken: string) {
   const user = await getUserFromToken(accessToken);
+  const rbacQueriesUsedAuthenticatedJwt = Boolean(accessToken.trim());
 
   if (!user) {
     return {
@@ -196,6 +197,7 @@ export async function getTokenDebugState(accessToken: string) {
       currentUserDetected: false,
       enginesCount: 0,
       profileFound: false,
+      rbacQueriesUsedAuthenticatedJwt,
     };
   }
 
@@ -207,6 +209,7 @@ export async function getTokenDebugState(accessToken: string) {
       currentUserDetected: true,
       enginesCount: 0,
       profileFound: false,
+      rbacQueriesUsedAuthenticatedJwt,
     };
   }
 
@@ -217,6 +220,7 @@ export async function getTokenDebugState(accessToken: string) {
       id: profile.companyId,
     },
     limit: 1,
+    requireAccessToken: true,
     select: "id,name",
   });
 
@@ -225,6 +229,7 @@ export async function getTokenDebugState(accessToken: string) {
     currentUserDetected: true,
     enginesCount: engines.length,
     profileFound: true,
+    rbacQueriesUsedAuthenticatedJwt,
   };
 }
 
@@ -262,6 +267,7 @@ async function getUserProfile(accessToken: string, userId: string): Promise<User
       user_id: userId,
     },
     limit: 1,
+    requireAccessToken: true,
     select: "user_id,company_id,full_name,role",
   });
   const row = rows[0];
@@ -276,6 +282,7 @@ async function getUserProfile(accessToken: string, userId: string): Promise<User
       id: row.company_id,
     },
     limit: 1,
+    requireAccessToken: true,
     select: "id,name",
   });
 
@@ -296,10 +303,12 @@ async function getEnginePermissions(accessToken: string, userId: string, company
         company_id: companyId,
         user_id: userId,
       },
+      requireAccessToken: true,
       select: "engine_id,can_read,can_create,can_execute,can_export",
     }),
     supabaseSelect<EngineRow>("audit_engines", {
       accessToken,
+      requireAccessToken: true,
       select: "id,code",
     }),
   ]);

@@ -9,6 +9,7 @@ type QueryOptions = {
     column: string;
   };
   params?: Record<string, string>;
+  requireAccessToken?: boolean;
   select?: string;
 };
 
@@ -85,6 +86,12 @@ function buildSupabaseRequest(table: string, options: QueryOptions) {
     return null;
   }
 
+  const authorizationToken = options.accessToken?.trim() || SUPABASE_ANON_KEY;
+
+  if (options.requireAccessToken && authorizationToken === SUPABASE_ANON_KEY) {
+    return null;
+  }
+
   const baseUrl = SUPABASE_URL.endsWith("/") ? SUPABASE_URL.slice(0, -1) : SUPABASE_URL;
   let url: URL;
 
@@ -116,7 +123,7 @@ function buildSupabaseRequest(table: string, options: QueryOptions) {
     headers: {
       Accept: "application/json",
       apikey: SUPABASE_ANON_KEY,
-      Authorization: `Bearer ${options.accessToken ?? SUPABASE_ANON_KEY}`,
+      Authorization: `Bearer ${authorizationToken}`,
     },
     url,
   };
