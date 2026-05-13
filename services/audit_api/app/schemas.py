@@ -16,7 +16,7 @@ class PedimentoData(BaseModel):
     customs_office: str = ""
     customs_value_mxn: float | None = None
     dta_mxn: float | None = None
-    exchange_rate: float | None = None
+    exchange_rate: str | float | None = None
     igi_mxn: float | None = None
     import_date: str = ""
     importer_name: str = ""

@@ -13,6 +13,11 @@ PDF_TEXT_NOT_EXTRACTABLE = "PDF_TEXT_NOT_EXTRACTABLE"
 
 _DATA_FIELDS = list(PedimentoData.model_fields.keys())
 
+# Validation patterns from real pedimento text seen in production:
+# - "NUM. PEDIMENTO: 25 17 1675 5004993"
+# - "DESTINO: 9 TIPO CAMBIO: 20.76530 PESO BRUTO: 6840.000 ADUANA E/S: 170"
+# - "FECHAS 11/04/2025 11/04/2025 ENTRADA PAGO"
+# - "DTA 0 14831", "IGI 0 352130", "IVA 0 355334", "PRV 0 290", "TOTAL 722631"
 _XML_ALIASES: dict[str, list[str]] = {
     "broker_name": ["broker_name", "agente_aduanal", "agenteAduanal", "nombreAgente", "nombreAgenteAduanal", "razonSocialAgente"],
     "broker_patent": ["broker_patent", "patente", "patenteAduanal", "patenteAgente", "patenteAgenteAduanal"],
@@ -127,36 +132,33 @@ def parse_pedimento_pdf(pdf_path: Path) -> PedimentoParseResponse:
 
     normalized = _normalize_text(text)
     upper = normalized.upper()
-    pedimento_parts = re.search(r"\b(\d{2})\s+(\d{2})\s+(\d{4})\s+(\d{7})\b", normalized)
-    pedimento_number = _clean_pedimento_number(_label_value(normalized, ["pedimento", "num. pedimento", "numero de pedimento"]))
-
-    if not pedimento_number and pedimento_parts:
-        pedimento_number = pedimento_parts.group(4)
-
-    import_date = _date_value(normalized, ["entrada", "fecha de entrada", "fecha importacion", "fecha de importacion"])
+    pedimento_parts = _pedimento_parts(normalized)
+    pedimento_number = pedimento_parts[3] if pedimento_parts else _clean_pedimento_number(_label_value(normalized, ["pedimento", "num. pedimento", "numero de pedimento"]))
+    pedimento_full = " ".join(pedimento_parts) if pedimento_parts else _label_value(normalized, ["pedimento completo"])
+    import_date, payment_date = _pedimento_dates(normalized)
     igi = _contribution_value(upper, "IGI")
     iva = _contribution_value(upper, "IVA")
     dta = _contribution_value(upper, "DTA")
     prv = _contribution_value(upper, "PRV")
-    detected_total = _money(_label_value(normalized, ["total contribuciones", "total efectivo", "total"]))
-    import_year = _year_from_date(import_date) or (2000 + int(pedimento_parts.group(1)) if pedimento_parts else None)
+    detected_total = _total_contributions_value(upper) or _money(_label_value(normalized, ["total contribuciones", "total efectivo", "total"]))
+    import_year = _year_from_date(import_date) or (2000 + int(pedimento_parts[0]) if pedimento_parts else None)
 
     data = PedimentoData(
-        broker_name=_party_name(normalized, ["agente aduanal", "nombre agente", "apoderado aduanal"]),
-        broker_patent=_label_value(normalized, ["patente", "patente aduanal"]) or (pedimento_parts.group(3) if pedimento_parts else ""),
+        broker_name=_broker_name_pdf(normalized),
+        broker_patent=_label_value(normalized, ["patente", "patente aduanal"]) or (pedimento_parts[2] if pedimento_parts else ""),
         commercial_value_usd=_money(_label_value(normalized, ["valor comercial dolares", "valor comercial usd", "valor dolares"])),
-        customs_office=_customs_office(normalized, pedimento_parts.group(2) if pedimento_parts else ""),
+        customs_office=_customs_office(normalized, pedimento_parts[1] if pedimento_parts else ""),
         customs_value_mxn=_money(_label_value(normalized, ["valor aduana", "valor en aduana", "valor aduana mxn"])),
         dta_mxn=dta,
-        exchange_rate=_money(_label_value(normalized, ["tipo cambio", "tipo de cambio"])),
+        exchange_rate=_exchange_rate(normalized),
         igi_mxn=igi,
         import_date=import_date,
-        importer_name=_party_name(normalized, ["importador", "nombre importador", "razon social"]),
+        importer_name=_importer_name_pdf(normalized),
         importer_rfc=_rfc_value(normalized),
         iva_mxn=iva,
         operation_code=_operation_code(pedimento_number, import_year),
-        payment_date=_date_value(normalized, ["pago", "fecha de pago"]),
-        pedimento_full=" ".join(pedimento_parts.groups()) if pedimento_parts else _label_value(normalized, ["pedimento completo"]),
+        payment_date=payment_date,
+        pedimento_full=pedimento_full,
         pedimento_number=pedimento_number,
         prv_mxn=prv,
         coves=_unique(match.group(1) for match in re.finditer(r"\bCOVE\s*[:.-]?\s*([A-Z0-9]{6,30})\b", upper)),
@@ -355,6 +357,98 @@ def _party_name(text: str, labels: list[str]) -> str:
     return re.sub(r"\bRFC\b.*$", "", _label_value(text, labels), flags=re.I).strip()
 
 
+def _pedimento_parts(text: str) -> tuple[str, str, str, str] | None:
+    labeled = re.search(
+        r"(?:NUM\.?\s*PEDIMENTO|NUMERO\s+DE\s+PEDIMENTO|PEDIMENTO)\s*[:.-]?\s*(\d{2})\s+(\d{2})\s+(\d{4})\s+(\d{7})\b",
+        text,
+        re.I,
+    )
+
+    if labeled:
+        return labeled.group(1), labeled.group(2), labeled.group(3), labeled.group(4)
+
+    fallback = re.search(r"\b(\d{2})\s+(\d{2})\s+(\d{4})\s+(\d{7})\b", text)
+    return fallback.groups() if fallback else None
+
+
+def _exchange_rate(text: str) -> str:
+    patterns = [
+        r"\bTIPO\s+CAMBIO\s*[:.-]?\s*([0-9]+(?:\.[0-9]+)?)",
+        r"\bTIPO\s+DE\s+CAMBIO\s*[:.-]?\s*([0-9]+(?:\.[0-9]+)?)",
+        r"\bT\.?\s*CAMBIO\s*[:.-]?\s*([0-9]+(?:\.[0-9]+)?)",
+        r"\bTC\s*[:.-]?\s*([0-9]+(?:\.[0-9]+)?)",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, re.I)
+
+        if match:
+            return match.group(1)
+
+    fallback = _money(_label_value(text, ["tipo cambio", "tipo de cambio", "t. cambio", "tc"]))
+    return str(fallback) if fallback is not None else ""
+
+
+def _pedimento_dates(text: str) -> tuple[str, str]:
+    fechas_match = re.search(
+        r"\bFECHAS?\s+(\d{1,2}[/-]\d{1,2}[/-](?:\d{2}|\d{4}))\s+(\d{1,2}[/-]\d{1,2}[/-](?:\d{2}|\d{4}))\s+ENTRADA\s+PAGO\b",
+        text,
+        re.I,
+    )
+
+    if fechas_match:
+        return fechas_match.group(1), fechas_match.group(2)
+
+    import_date = _date_value(text, ["entrada", "fecha de entrada", "fecha importacion", "fecha de importacion"])
+    payment_date = _date_value(text, ["pago", "fecha de pago"])
+
+    return import_date, payment_date
+
+
+def _importer_name_pdf(text: str) -> str:
+    patterns = [
+        r"\bIMPORTADOR\s+(?:RFC\s*)?[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}\s+([A-ZÁÉÍÓÚÜÑ&.,\s]+?)(?=\s+(?:DOMICILIO|CURP|VAL\.|VALOR|ACUSE|FACTURAS|PROVEEDOR|EXPORTADOR|IMPORTE)\b)",
+        r"\bIMPORTADOR\s*[:.-]?\s*([A-ZÁÉÍÓÚÜÑ&.,\s]+?)(?=\s+(?:RFC|DOMICILIO|CURP|VAL\.|VALOR|/ EXPORTADOR|EXPORTADOR|IMPORTE)\b)",
+    ]
+
+    for pattern in patterns:
+        value = _clean_party_capture(_first_match(text, pattern))
+
+        if value:
+            return value
+
+    return _party_name(text, ["importador", "nombre importador", "razon social"])
+
+
+def _broker_name_pdf(text: str) -> str:
+    patterns = [
+        r"\b(?:AGENTE\s+ADUANAL|APODERADO\s+ADUANAL|MANDATARIO)\s*[:.-]?\s*([A-ZÁÉÍÓÚÜÑ&.,\s]+?)(?=\s+(?:RFC|CURP|PATENTE|NUM\.?\s*PEDIMENTO|PEDIMENTO|ADUANA)\b)",
+        r"\b(DESPACHOS\s+ADUANALES\s+CASTAÑEDA\s+SC)\b",
+        r"\b(ELSA\s+CASTAÑEDA\s+TREVIÑO)\b",
+    ]
+
+    for pattern in patterns:
+        value = _clean_party_capture(_first_match(text, pattern))
+
+        if value:
+            return value
+
+    return _party_name(text, ["agente aduanal", "nombre agente", "apoderado aduanal"])
+
+
+def _first_match(text: str, pattern: str) -> str:
+    match = re.search(pattern, text, re.I)
+    return match.group(1) if match else ""
+
+
+def _clean_party_capture(value: str) -> str:
+    cleaned = _normalize_text(value)
+    cleaned = re.sub(r"^/+\s*", "", cleaned)
+    cleaned = re.sub(r"\s*/?\s*(?:EXPORTADOR|IMPORTE).*$", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"\b(?:RFC|CURP|DOMICILIO)\b.*$", "", cleaned, flags=re.I)
+    return cleaned.strip(" .-/")
+
+
 def _reference_value(text: str) -> str:
     labeled = _label_value(text, ["referencia", "referencia aduanal", "ref"])
     match = re.search(r"[A-Z]{1,4}[-/]?\d{3,}[-/]?\d{0,4}", labeled, re.I) or re.search(r"\b[A-Z]{1,4}-\d{3,}-\d{2,4}\b", text, re.I)
@@ -368,6 +462,11 @@ def _rfc_value(text: str) -> str:
 
 
 def _customs_office(text: str, pedimento_office: str) -> str:
+    aduana_es = re.search(r"\bADUANA\s+E/S\s*[:.-]?\s*(\d{2,3})\b", text, re.I)
+
+    if aduana_es:
+        return aduana_es.group(1)
+
     labeled = _label_value(text, ["aduana", "aduana despacho", "aduana seccion"])
     digits = re.search(r"\b\d{2,3}\b", labeled)
 
@@ -378,8 +477,33 @@ def _customs_office(text: str, pedimento_office: str) -> str:
 
 
 def _contribution_value(text: str, key: str) -> float | None:
-    match = re.search(rf"\b{key}\b\s*[:.-]?\s*(?:\d+\s+){{0,4}}([$]?[\d,]+(?:\.\d+)?)", text, re.I)
-    return _money(match.group(1) if match else "")
+    patterns = [
+        rf"\b{key}\b\s+0\s+([$]?[\d,]+(?:\.\d+)?)\b",
+        rf"\b{key}\b\s*[:.-]?\s*(?:\d+\s+){{0,4}}([$]?[\d,]+(?:\.\d+)?)",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, re.I)
+
+        if match:
+            return _money(match.group(1))
+
+    return None
+
+
+def _total_contributions_value(text: str) -> float | None:
+    patterns = [
+        r"\bTOTAL\s+([$]?[\d,]+(?:\.\d+)?)\b",
+        r"\bTOTAL\s+(?:CONTRIBUCIONES|EFECTIVO)\s*[:.-]?\s*([$]?[\d,]+(?:\.\d+)?)\b",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, re.I)
+
+        if match:
+            return _money(match.group(1))
+
+    return None
 
 
 def _tariff_items_pdf(text: str) -> list[str]:
