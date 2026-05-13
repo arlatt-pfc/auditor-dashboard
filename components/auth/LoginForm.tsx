@@ -26,8 +26,18 @@ export function LoginForm() {
     setIsSubmitting(false);
 
     if (!response?.ok) {
-      const payload = (await response?.json().catch(() => null)) as { message?: string } | null;
-      setError(payload?.message ?? "No se pudo iniciar sesion.");
+      const payload = (await response?.json().catch(() => null)) as {
+        error_code?: string;
+        error_message?: string;
+        message?: string;
+        stage?: string;
+      } | null;
+      const genericMessage = "No se pudo iniciar sesion. Verifica tus credenciales o contacta al administrador.";
+      const debugMessage = payload?.error_code
+        ? `${payload.error_code} (${payload.stage ?? "unknown"}): ${payload.error_message ?? payload.message ?? genericMessage}`
+        : payload?.message;
+
+      setError(process.env.NODE_ENV === "development" ? debugMessage ?? genericMessage : genericMessage);
       return;
     }
 

@@ -24,6 +24,14 @@ export function hasSupabaseConfig() {
   return Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 }
 
+export function getSupabaseRestConfig() {
+  return {
+    anonKeyConfigured: Boolean(SUPABASE_ANON_KEY),
+    host: getSupabaseHost(),
+    urlConfigured: Boolean(SUPABASE_URL),
+  };
+}
+
 export async function supabaseSelect<T>(table: string, options: QueryOptions = {}): Promise<T[]> {
   const request = buildSupabaseRequest(table, options);
 
@@ -78,7 +86,13 @@ function buildSupabaseRequest(table: string, options: QueryOptions) {
   }
 
   const baseUrl = SUPABASE_URL.endsWith("/") ? SUPABASE_URL.slice(0, -1) : SUPABASE_URL;
-  const url = new URL(`${baseUrl}/rest/v1/${table}`);
+  let url: URL;
+
+  try {
+    url = new URL(`${baseUrl}/rest/v1/${table}`);
+  } catch {
+    return null;
+  }
 
   url.searchParams.set("select", options.select ?? "*");
 
@@ -100,9 +114,23 @@ function buildSupabaseRequest(table: string, options: QueryOptions) {
 
   return {
     headers: {
+      Accept: "application/json",
       apikey: SUPABASE_ANON_KEY,
       Authorization: `Bearer ${options.accessToken ?? SUPABASE_ANON_KEY}`,
     },
     url,
   };
+}
+
+function getSupabaseHost() {
+  if (!SUPABASE_URL) {
+    return null;
+  }
+
+  try {
+    const baseUrl = SUPABASE_URL.endsWith("/") ? SUPABASE_URL.slice(0, -1) : SUPABASE_URL;
+    return new URL(baseUrl).host;
+  } catch {
+    return null;
+  }
 }

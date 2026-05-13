@@ -9,12 +9,37 @@ export { ACCESS_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE };
 
 type SupabaseAuthResponse = {
   access_token?: string;
+  error?: string;
+  error_code?: string;
+  error_description?: string;
   expires_in?: number;
+  msg?: string;
   refresh_token?: string;
   user?: {
     email?: string;
     id?: string;
   };
+};
+
+export type SupabasePasswordSignInResult = {
+  data: SupabaseAuthResponse | null;
+  errorCode?: string;
+  errorMessage?: string;
+  host?: string | null;
+  ok: boolean;
+  status?: number;
+};
+
+export type AuthDebugState = {
+  companyFound: boolean;
+  currentUserDetected: boolean;
+  enginesCount: number;
+  hasAuthCookie: boolean;
+  nodeEnv: string;
+  profileFound: boolean;
+  supabaseAnonKeyConfigured: boolean;
+  supabaseHost: string | null;
+  supabaseUrlConfigured: boolean;
 };
 
 type UserProfileRow = {
@@ -47,25 +72,52 @@ const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const knownEngineCodes: AuditEngineCode[] = ["CUSTOMS_COMPLIANCE", "STPS_PEMEX_COMPLIANCE", "CONTRACTOR_COMPLIANCE"];
 
 export async function signInWithPassword(email: string, password: string) {
+  const result = await signInWithPasswordDetailed(email, password);
+  return result.ok ? result.data : null;
+}
+
+export async function signInWithPasswordDetailed(email: string, password: string): Promise<SupabasePasswordSignInResult> {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-    return null;
+    return {
+      data: null,
+      errorCode: "ENV_MISSING",
+      errorMessage: "Supabase URL or anon key is not configured.",
+      host: getSupabaseHost(),
+      ok: false,
+    };
   }
 
   const response = await fetch(`${baseSupabaseUrl()}/auth/v1/token?grant_type=password`, {
     body: JSON.stringify({ email, password }),
     cache: "no-store",
     headers: {
+      Accept: "application/json",
       apikey: SUPABASE_ANON_KEY,
       "Content-Type": "application/json",
     },
     method: "POST",
   }).catch(() => null);
 
-  if (!response?.ok) {
-    return null;
+  if (!response) {
+    return {
+      data: null,
+      errorCode: "SUPABASE_AUTH_UNREACHABLE",
+      errorMessage: "Supabase Auth request failed before receiving a response.",
+      host: getSupabaseHost(),
+      ok: false,
+    };
   }
 
-  return response.json() as Promise<SupabaseAuthResponse>;
+  const data = (await response.json().catch(() => null)) as SupabaseAuthResponse | null;
+
+  return {
+    data,
+    errorCode: data?.error_code ?? data?.error ?? (response.ok ? undefined : "SUPABASE_AUTH_FAILED"),
+    errorMessage: data?.error_description ?? data?.msg ?? data?.error,
+    host: getSupabaseHost(),
+    ok: response.ok,
+    status: response.status,
+  };
 }
 
 export async function getAuthContext(): Promise<AuthContext | null> {
@@ -115,6 +167,65 @@ export function userCanCreateEngine(context: AuthContext | null, engineCode: Aud
   }
 
   return Boolean(context?.engines.some((engine) => engine.code === engineCode && engine.canCreate));
+}
+
+export async function getAuthDebugState(): Promise<AuthDebugState> {
+  const cookieStore = await cookies();
+  const accessToken = cookieStore.get(ACCESS_TOKEN_COOKIE)?.value;
+  const tokenDebug = accessToken ? await getTokenDebugState(accessToken) : null;
+
+  return {
+    companyFound: tokenDebug?.companyFound ?? false,
+    currentUserDetected: tokenDebug?.currentUserDetected ?? false,
+    enginesCount: tokenDebug?.enginesCount ?? 0,
+    hasAuthCookie: Boolean(accessToken),
+    nodeEnv: process.env.NODE_ENV,
+    profileFound: tokenDebug?.profileFound ?? false,
+    supabaseAnonKeyConfigured: Boolean(SUPABASE_ANON_KEY),
+    supabaseHost: getSupabaseHost(),
+    supabaseUrlConfigured: Boolean(SUPABASE_URL),
+  };
+}
+
+export async function getTokenDebugState(accessToken: string) {
+  const user = await getUserFromToken(accessToken);
+
+  if (!user) {
+    return {
+      companyFound: false,
+      currentUserDetected: false,
+      enginesCount: 0,
+      profileFound: false,
+    };
+  }
+
+  const profile = await getUserProfile(accessToken, user.id);
+
+  if (!profile) {
+    return {
+      companyFound: false,
+      currentUserDetected: true,
+      enginesCount: 0,
+      profileFound: false,
+    };
+  }
+
+  const engines = await getEnginePermissions(accessToken, user.id, profile.companyId);
+  const companyRows = await supabaseSelect<CompanyRow>("companies", {
+    accessToken,
+    eq: {
+      id: profile.companyId,
+    },
+    limit: 1,
+    select: "id,name",
+  });
+
+  return {
+    companyFound: companyRows.length > 0,
+    currentUserDetected: true,
+    enginesCount: engines.length,
+    profileFound: true,
+  };
 }
 
 async function getUserFromToken(accessToken: string): Promise<AuthUser | null> {
@@ -219,6 +330,18 @@ function baseSupabaseUrl() {
   }
 
   return SUPABASE_URL.endsWith("/") ? SUPABASE_URL.slice(0, -1) : SUPABASE_URL;
+}
+
+export function getSupabaseHost() {
+  if (!SUPABASE_URL) {
+    return null;
+  }
+
+  try {
+    return new URL(baseSupabaseUrl()).host;
+  } catch {
+    return null;
+  }
 }
 
 function isAuditEngineCode(value: unknown): value is AuditEngineCode {

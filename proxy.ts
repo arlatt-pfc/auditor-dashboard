@@ -14,5 +14,6 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
+  // /login and /api/auth/* stay public. Only dashboard routes require a session cookie.
   matcher: ["/dashboard/:path*"],
 };
