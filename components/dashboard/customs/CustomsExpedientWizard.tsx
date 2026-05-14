@@ -813,11 +813,14 @@ function ReviewStep({
         type="button"
         onClick={onRun}
         disabled={isRunning}
-        className={`mt-5 rounded-2xl px-5 py-3 text-sm font-semibold text-white transition ${
-          isRunning
-            ? "bg-slate-300 cursor-not-allowed"
-            : "bg-slate-900 hover:bg-slate-800"
-        }`}
+        style={{
+          backgroundColor: "#0f172a",
+          color: "#ffffff",
+          opacity: 1,
+          cursor: isRunning ? "not-allowed" : "pointer",
+          pointerEvents: "auto",
+        }}
+        className="mt-5 rounded-2xl px-5 py-3 text-sm font-semibold shadow-lg"
       >
         {isRunning ? "Ejecutando auditoría..." : "Ejecutar auditoría"}
       </button>
