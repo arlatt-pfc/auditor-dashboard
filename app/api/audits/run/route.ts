@@ -36,6 +36,22 @@ const CUSTOMS_ENGINE_CODE = "CUSTOMS_COMPLIANCE";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  try {
+    console.log("[audits.run] handler started");
+    return await handleAuditRun(request);
+  } catch (error) {
+    console.error("[audits.run] unhandled route error", error);
+    return NextResponse.json(
+      {
+        detail: error instanceof Error ? error.message : String(error),
+        error: "UNHANDLED_ROUTE_ERROR",
+      },
+      { status: 500 },
+    );
+  }
+}
+
+async function handleAuditRun(request: Request) {
   const auth = await getAuthContext();
 
   if (!auth?.profile) {
@@ -77,10 +93,15 @@ export async function POST(request: Request) {
 
   console.info("AUDIT_RUN_FORMDATA", {
     formDataKeys: Array.from(incomingFormData.keys()),
+    mainFileExists: file instanceof File,
     mainFileName: file instanceof File ? file.name : null,
     mainFileSize: file instanceof File ? file.size : null,
     supportFilesCount: supportFiles.length,
   });
+
+  if (file === null) {
+    return NextResponse.json({ error: "MAIN_FILE_MISSING" }, { status: 400 });
+  }
 
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "AUDIT_FILE_REQUIRED" }, { status: 400 });
@@ -170,6 +191,7 @@ export async function POST(request: Request) {
   console.info("AUDIT_RUN_EXTERNAL_FETCH", {
     url: auditApiUrl,
   });
+  console.log("[audits.run] external fetch", { url: auditApiUrl });
 
   let auditResponse: Response;
 
