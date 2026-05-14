@@ -186,6 +186,8 @@ const baseDocumentLabels: Record<BaseDocumentKind, string> = {
   xml_pedimento: "XML Pedimento",
 };
 
+const customsAuditEndpoint = "https://api.logisticadedatos.com.mx/audit/run";
+
 export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) {
   void canExecute;
 
@@ -452,7 +454,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     }
 
     console.log("[customs.audit.fetch.start]", {
-      endpoint: "/api/audits/run",
+      endpoint: customsAuditEndpoint,
       hasBaseFile: Boolean(baseFile),
       operationCode: xmlData.operation_code,
       pedimentoNumber: xmlData.pedimento_number,
@@ -461,8 +463,11 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     let response: Response;
 
     try {
-      response = await fetch("/api/audits/run", {
+      response = await fetch(customsAuditEndpoint, {
         body: formData,
+        headers: {
+          "X-LDA-Audit-Client": "customs-dashboard",
+        },
         method: "POST",
       });
       console.log("[customs.audit.fetch.response]", {

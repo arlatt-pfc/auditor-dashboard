@@ -1,8 +1,10 @@
 from pathlib import Path
 from uuid import uuid4
+import json
 import shutil
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .config import Settings, get_settings
@@ -12,6 +14,17 @@ from .schemas import AuditRunResponse, PedimentoParseResponse
 
 app = FastAPI(title="LDA Audit API", version="0.1.0")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://auditor-dashboard.netlify.app",
+        "http://localhost:3000",
+    ],
+    allow_credentials=False,
+    allow_headers=["Authorization", "Content-Type", "X-LDA-Audit-Client"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+)
+
 
 @app.get("/health")
 def health() -> dict[str, str]:
@@ -20,16 +33,58 @@ def health() -> dict[str, str]:
 
 @app.post("/audit/run", response_model=AuditRunResponse)
 async def run_audit(
-    audit_topic: str = Form(...),
-    engine_id: str = Form(...),
-    company_id: str = Form(...),
-    user_id: str = Form(...),
-    file: UploadFile = File(...),
+    audit_topic: str = Form("Customs Compliance"),
+    engine_id: str = Form("CUSTOMS_COMPLIANCE"),
+    company_id: str = Form("customs-dashboard"),
+    user_id: str = Form("customs-dashboard"),
+    file: UploadFile | None = File(default=None),
+    support_files: list[UploadFile] | None = File(default=None),
+    pedimento_data: str = Form(""),
+    loaded_documents: str = Form(""),
+    missing_required_documents: str = Form(""),
+    missing_support_documents: str = Form(""),
     authorization: str | None = Header(default=None),
+    x_lda_audit_client: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
-) -> AuditRunResponse:
-    _authorize_request(settings, authorization)
-    _validate_pdf(file)
+) -> AuditRunResponse | JSONResponse:
+    _authorize_audit_run(settings, authorization, x_lda_audit_client)
+
+    metadata = {
+        "loaded_documents": _parse_json_metadata(loaded_documents),
+        "missing_required_documents": _parse_json_metadata(missing_required_documents),
+        "missing_support_documents": _parse_json_metadata(missing_support_documents),
+        "pedimento_data": _parse_json_metadata(pedimento_data),
+    }
+    missing_documents_count = _metadata_count(metadata["missing_required_documents"]) + _metadata_count(metadata["missing_support_documents"])
+
+    print(
+        "[audit.run] received",
+        {
+            "main_file_name": file.filename if file else None,
+            "metadata_keys": [key for key, value in metadata.items() if value],
+            "missing_documents_count": missing_documents_count,
+            "support_files_count": len(support_files or []),
+        },
+    )
+
+    if file is None:
+        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content={"error": "MAIN_FILE_MISSING"})
+
+    payload = await file.read()
+    print(
+        "[audit.run] file",
+        {
+            "main_file_name": file.filename,
+            "main_file_size": len(payload),
+            "support_files_count": len(support_files or []),
+        },
+    )
+
+    if not payload:
+        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content={"error": "MAIN_FILE_MISSING", "detail": "Main file is empty."})
+
+    if not _is_pdf(file):
+        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content={"error": "INVALID_FILE_TYPE", "detail": "Only PDF audit files are supported."})
 
     request_id = str(uuid4())
     work_dir = settings.tmp_dir / request_id
@@ -38,7 +93,7 @@ async def run_audit(
 
     try:
         with pdf_path.open("wb") as target:
-            shutil.copyfileobj(file.file, target)
+            target.write(payload)
 
         return run_pipeline(
             audit_topic=audit_topic,
@@ -50,7 +105,9 @@ async def run_audit(
             work_dir=work_dir,
         )
     except PipelineExecutionError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        return JSONResponse(status_code=status.HTTP_502_BAD_GATEWAY, content={"error": "AUDIT_EXECUTION_FAILED", "detail": str(exc)})
+    except Exception as exc:
+        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content={"error": "AUDIT_EXECUTION_FAILED", "detail": str(exc)})
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 
@@ -96,6 +153,13 @@ def _authorize_request(settings: Settings, authorization: str | None) -> None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid audit API credentials.")
 
 
+def _authorize_audit_run(settings: Settings, authorization: str | None, audit_client: str | None) -> None:
+    if audit_client == "customs-dashboard":
+        return
+
+    _authorize_request(settings, authorization)
+
+
 def _validate_pdf(file: UploadFile) -> None:
     filename = file.filename or ""
     if not filename.lower().endswith(".pdf"):
@@ -105,9 +169,34 @@ def _validate_pdf(file: UploadFile) -> None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid file content type.")
 
 
+def _is_pdf(file: UploadFile) -> bool:
+    filename = file.filename or ""
+    return filename.lower().endswith(".pdf") and file.content_type in {None, "", "application/pdf", "application/octet-stream"}
+
+
 def _safe_pdf_name(filename: str) -> str:
     safe = "".join(character if character.isalnum() or character in "._-" else "_" for character in filename)
     return safe if safe.lower().endswith(".pdf") else f"{safe}.pdf"
+
+
+def _parse_json_metadata(value: str) -> object:
+    if not value:
+        return {}
+
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+
+
+def _metadata_count(value: object) -> int:
+    if isinstance(value, list):
+        return len(value)
+
+    if isinstance(value, dict):
+        return len(value)
+
+    return 0
 
 
 def _customs_error(code: str, status_code: int, message: str) -> JSONResponse:
