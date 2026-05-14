@@ -1,19 +1,44 @@
 import Link from "next/link";
 import { connection } from "next/server";
 
-import { CustomsKpiGrid } from "@/components/dashboard/customs/CustomsKpiGrid";
-import { customsKpis, customsOperationMock, formatCurrency } from "@/components/dashboard/customs/mock-data";
-import { CustomsOperationsTable } from "@/components/dashboard/customs/CustomsOperationsTable";
+import { CustomsAuditPdfButton } from "@/components/dashboard/customs/CustomsAuditPdfButton";
 import { Header } from "@/components/dashboard/Header";
 import { PageShell } from "@/components/dashboard/PageShell";
 import { getAuthContext, userCanCreateEngine, userCanExecuteEngine, userCanReadEngine } from "@/lib/auth/session";
-import { getCustomsOperations } from "@/lib/customs/supabase";
-import type { CustomsOperation } from "@/lib/customs/types";
-import type { Stat } from "@/components/dashboard/types";
+import { supabaseSelect } from "@/lib/supabase/client";
+
+type CustomsCompliancePageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+type CustomsAuditRow = {
+  broker_name?: string | null;
+  compliance_percent?: number | string | null;
+  created_at?: string | null;
+  customs_office?: string | null;
+  executive_dictamen?: string | null;
+  findings?: unknown;
+  id?: string | null;
+  importer_name?: string | null;
+  loaded_documents?: unknown;
+  missing_documents?: unknown;
+  operation_code?: string | null;
+  pedimento_data?: unknown;
+  pedimento_number?: string | null;
+  result_json?: unknown;
+  risk_level?: string | null;
+};
+
+type Filters = {
+  date: string;
+  importer: string;
+  pedimento: string;
+  risk: string;
+};
 
 const currentPath = "/dashboard/customs-compliance";
 
-export default async function CustomsCompliancePage() {
+export default async function CustomsCompliancePage({ searchParams }: CustomsCompliancePageProps) {
   await connection();
 
   const auth = await getAuthContext();
@@ -32,19 +57,23 @@ export default async function CustomsCompliancePage() {
     );
   }
 
-  const supabaseOperations = await getCustomsOperations({
+  const filters = normalizeFilters((await searchParams) ?? {});
+  const rows = await supabaseSelect<CustomsAuditRow>("customs_audits", {
     accessToken: auth?.accessToken,
+    order: {
+      ascending: false,
+      column: "created_at",
+    },
   });
-  const usesMockData = supabaseOperations.length === 0;
-  const operations = usesMockData ? [customsOperationMock] : supabaseOperations;
-  const kpis = usesMockData ? customsKpis.slice(0, 3) : buildCustomsKpis(operations);
+  const audits = rows.filter((row) => matchesFilters(row, filters));
+  const kpis = buildKpis(audits);
 
   return (
     <PageShell currentPath={currentPath}>
       <Header
         eyebrow="CUSTOMS_COMPLIANCE"
-        title="Customs Compliance"
-        description="Auditoría inteligente de expedientes aduanales de importación para identificar sobrepagos, cargos indebidos y recuperación potencial."
+        title="Histórico de Auditorías Customs"
+        description="Consulta auditorías aduanales ejecutadas, filtra expedientes y descarga reportes ejecutivos en PDF."
         actions={
           <>
             <Link
@@ -66,72 +95,280 @@ export default async function CustomsCompliancePage() {
       />
 
       <div className="mx-auto max-w-7xl space-y-6 px-6 py-8">
-        <CustomsKpiGrid kpis={kpis} />
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {kpis.map((kpi) => (
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm" key={kpi.label}>
+              <p className="text-sm text-slate-500">{kpi.label}</p>
+              <div className="mt-3 flex items-end justify-between gap-3">
+                <span className="text-3xl font-bold tracking-tight text-slate-900">{kpi.value}</span>
+                <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">{kpi.hint}</span>
+              </div>
+            </div>
+          ))}
+        </section>
+
+        <FiltersPanel filters={filters} />
 
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h3 className="text-xl font-semibold text-slate-900">Expedientes aduanales</h3>
-              <p className="mt-1 text-sm text-slate-500">
-                Consulta operaciones existentes o inicia un expediente nuevo para ejecutar la auditoria documental.
-              </p>
+              <h3 className="text-xl font-semibold text-slate-900">Auditorías registradas</h3>
+              <p className="mt-1 text-sm text-slate-500">Datos leídos desde public.customs_audits.</p>
             </div>
-            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-              {usesMockData ? "Mock fallback" : "Supabase activo"}
-            </span>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">{audits.length} auditorías</span>
+          </div>
+
+          <div className="mt-6 overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead className="border-b border-slate-200 text-slate-500">
+                <tr>
+                  <th className="pb-3 pr-4 font-medium">Fecha</th>
+                  <th className="pb-3 pr-4 font-medium">Expediente</th>
+                  <th className="pb-3 pr-4 font-medium">Pedimento</th>
+                  <th className="pb-3 pr-4 font-medium">Importador</th>
+                  <th className="pb-3 pr-4 font-medium">Agente aduanal</th>
+                  <th className="pb-3 pr-4 font-medium">Cumplimiento</th>
+                  <th className="pb-3 pr-4 font-medium">Riesgo</th>
+                  <th className="pb-3 font-medium">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {audits.map((audit) => (
+                  <tr className="border-b border-slate-100 align-top last:border-b-0" key={text(audit.id, audit.operation_code)}>
+                    <td className="py-4 pr-4 text-slate-600">{formatDate(audit.created_at)}</td>
+                    <td className="py-4 pr-4">
+                      <div className="font-medium text-slate-900">{text(audit.operation_code, "Sin expediente")}</div>
+                      <div className="mt-1 text-xs text-slate-500">{text(audit.id)}</div>
+                    </td>
+                    <td className="py-4 pr-4 text-slate-600">{text(audit.pedimento_number, "Pendiente")}</td>
+                    <td className="max-w-sm py-4 pr-4 text-slate-600">{text(audit.importer_name, "Sin importador")}</td>
+                    <td className="max-w-sm py-4 pr-4 text-slate-600">{text(audit.broker_name, "Sin agente")}</td>
+                    <td className="py-4 pr-4 font-medium text-slate-900">{formatPercent(audit.compliance_percent)}</td>
+                    <td className="py-4 pr-4">
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${riskClass(audit.risk_level)}`}>
+                        {text(audit.risk_level, "unknown")}
+                      </span>
+                    </td>
+                    <td className="py-4">
+                      <div className="flex flex-wrap gap-2">
+                        <Link
+                          className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+                          href={`/dashboard/customs-compliance/${encodeURIComponent(text(audit.operation_code, audit.id))}`}
+                        >
+                          Ver
+                        </Link>
+                        <CustomsAuditPdfButton
+                          auditResult={auditResult(audit)}
+                          expediente={text(audit.operation_code, audit.id, "expediente")}
+                          loadedDocuments={arrayFrom(audit.loaded_documents)}
+                          missingDocuments={arrayFrom(audit.missing_documents)}
+                          pedimentoData={pedimentoData(audit)}
+                        />
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {audits.length === 0 ? (
+                  <tr>
+                    <td className="py-8 text-center text-sm text-slate-500" colSpan={8}>
+                      No hay auditorías que coincidan con los filtros seleccionados.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
           </div>
         </section>
-
-        <CustomsOperationsTable operations={operations} />
-
-        {!canManageCustoms ? (
-          <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
-            Tu rol permite consultar expedientes, pero no crear ni ejecutar auditorias de Customs Compliance.
-          </section>
-        ) : null}
       </div>
     </PageShell>
   );
 }
 
-function buildCustomsKpis(operations: CustomsOperation[]): Stat[] {
-  const totals = operations.reduce(
-    (current, operation) => ({
-      criticalFindings: current.criticalFindings + operation.metrics.criticalFindings,
-      potentialRecovery: current.potentialRecovery + operation.metrics.potentialRecovery,
-      riskScore: current.riskScore + operation.metrics.riskScore,
-    }),
-    {
-      criticalFindings: 0,
-      potentialRecovery: 0,
-      riskScore: 0,
-    },
+function FiltersPanel({ filters }: { filters: Filters }) {
+  return (
+    <form className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-[1.2fr_1fr_0.8fr_0.8fr_auto]">
+        <FilterInput label="Importador" name="importer" value={filters.importer} />
+        <FilterInput label="Pedimento" name="pedimento" value={filters.pedimento} />
+        <label className="block">
+          <span className="text-sm font-semibold text-slate-700">Nivel de riesgo</span>
+          <select
+            className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+            defaultValue={filters.risk}
+            name="risk"
+          >
+            <option value="">Todos</option>
+            <option value="Critical">Critical</option>
+            <option value="High">High</option>
+            <option value="Medium">Medium</option>
+            <option value="Low">Low</option>
+          </select>
+        </label>
+        <FilterInput label="Fecha" name="date" type="date" value={filters.date} />
+        <div className="flex items-end gap-2">
+          <button className="rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800" type="submit">
+            Filtrar
+          </button>
+          <Link className="rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50" href="/dashboard/customs-compliance">
+            Limpiar
+          </Link>
+        </div>
+      </div>
+    </form>
   );
-  const riskScoreAverage = operations.length > 0 ? Math.round(totals.riskScore / operations.length) : 0;
-  const topOperation = operations[0];
+}
+
+function FilterInput({ label, name, type = "text", value }: { label: string; name: keyof Filters; type?: string; value: string }) {
+  return (
+    <label className="block">
+      <span className="text-sm font-semibold text-slate-700">{label}</span>
+      <input
+        className="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+        defaultValue={value}
+        name={name}
+        type={type}
+      />
+    </label>
+  );
+}
+
+function buildKpis(audits: CustomsAuditRow[]) {
+  const total = audits.length;
+  const complianceTotal = audits.reduce((sum, audit) => sum + number(audit.compliance_percent), 0);
+  const averageCompliance = total > 0 ? Math.round(complianceTotal / total) : 0;
+  const highRisk = audits.filter((audit) => normalizedRisk(audit.risk_level) === "high" || normalizedRisk(audit.risk_level) === "critical").length;
+  const mediumRisk = audits.filter((audit) => normalizedRisk(audit.risk_level) === "medium").length;
 
   return [
-    {
-      label: "Operaciones Auditadas",
-      value: String(operations.length),
-      hint: topOperation?.operationId ?? "customs_operations",
-    },
-    {
-      label: "Recuperacion Potencial",
-      value: formatCurrency(totals.potentialRecovery),
-      hint: "customs_operations",
-    },
-    {
-      label: "Hallazgos Criticos",
-      value: String(totals.criticalFindings),
-      hint: getRiskLabel(riskScoreAverage),
-    },
+    { label: "Total auditorías", value: String(total), hint: "customs_audits" },
+    { label: "Cumplimiento promedio", value: `${averageCompliance}%`, hint: "estimado" },
+    { label: "Riesgo alto", value: String(highRisk), hint: "High/Critical" },
+    { label: "Riesgo medio", value: String(mediumRisk), hint: "Medium" },
   ];
 }
 
-function getRiskLabel(score: number) {
-  if (score >= 90) return "Critico";
-  if (score >= 70) return "Alto";
-  if (score >= 40) return "Medio";
-  return "Bajo";
+function normalizeFilters(searchParams: Record<string, string | string[] | undefined>): Filters {
+  return {
+    date: firstParam(searchParams.date),
+    importer: firstParam(searchParams.importer),
+    pedimento: firstParam(searchParams.pedimento),
+    risk: firstParam(searchParams.risk),
+  };
+}
+
+function matchesFilters(row: CustomsAuditRow, filters: Filters) {
+  return (
+    contains(row.importer_name, filters.importer) &&
+    contains(row.pedimento_number, filters.pedimento) &&
+    (!filters.risk || normalizedRisk(row.risk_level) === filters.risk.toLowerCase()) &&
+    (!filters.date || text(row.created_at).startsWith(filters.date))
+  );
+}
+
+function auditResult(audit: CustomsAuditRow) {
+  const result = asRecord(audit.result_json);
+
+  return {
+    compliance_percent: audit.compliance_percent,
+    executive_dictamen: audit.executive_dictamen,
+    findings: arrayFrom(audit.findings),
+    risk_level: audit.risk_level,
+    top_critical_gaps: arrayFrom(result.top_critical_gaps),
+    ...result,
+  };
+}
+
+function pedimentoData(audit: CustomsAuditRow) {
+  return {
+    broker_name: audit.broker_name,
+    customs_office: audit.customs_office,
+    importer_name: audit.importer_name,
+    operation_code: audit.operation_code,
+    pedimento_number: audit.pedimento_number,
+    ...asRecord(audit.pedimento_data),
+  };
+}
+
+function contains(value: unknown, query: string) {
+  if (!query) {
+    return true;
+  }
+
+  return text(value).toLowerCase().includes(query.toLowerCase());
+}
+
+function formatDate(value: unknown) {
+  const date = new Date(text(value));
+
+  if (Number.isNaN(date.getTime())) {
+    return "Sin fecha";
+  }
+
+  return new Intl.DateTimeFormat("es-MX", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function formatPercent(value: unknown) {
+  const parsed = number(value);
+  return `${Math.round(parsed)}%`;
+}
+
+function riskClass(value: unknown) {
+  switch (normalizedRisk(value)) {
+    case "critical":
+      return "bg-red-100 text-red-800";
+    case "high":
+      return "bg-orange-100 text-orange-800";
+    case "medium":
+      return "bg-yellow-100 text-yellow-800";
+    case "low":
+      return "bg-blue-100 text-blue-800";
+    default:
+      return "bg-slate-100 text-slate-700";
+  }
+}
+
+function normalizedRisk(value: unknown) {
+  return text(value).toLowerCase();
+}
+
+function arrayFrom(value: unknown) {
+  return Array.isArray(value) ? value : [];
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function firstParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
+}
+
+function number(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  return 0;
+}
+
+function text(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(value);
+    }
+  }
+
+  return "";
 }
