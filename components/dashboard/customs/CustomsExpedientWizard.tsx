@@ -205,14 +205,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
   const normalizedOperationCode = (xmlData.operation_code || data.operation_code || "").trim();
   const hasPedimentoNumber = normalizedPedimentoNumber.length > 0;
   const isCfdiInvalid = baseDocumentKind === "cfdi_invalid";
-  const isUploading = isParsing;
-  const canRunAudit =
-    Boolean(baseFile) &&
-    normalizedPedimentoNumber.length > 0 &&
-    normalizedOperationCode.length > 0 &&
-    !isCfdiInvalid &&
-    !isUploading &&
-    !isRunning;
+  const canRunAudit = hasMinimumAuditData() && !isRunning;
   const basePdfPedimentoFile = baseDocumentKind === "pdf_pedimento" ? baseFile : null;
   const effectiveFiles = useMemo(
     () => ({
@@ -239,6 +232,15 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     operationCode: normalizedOperationCode,
     pedimentoNumber: normalizedPedimentoNumber,
   };
+
+  function hasMinimumAuditData() {
+    return (
+      Boolean(baseFile) &&
+      Boolean((xmlData.pedimento_number || "").trim()) &&
+      Boolean((xmlData.operation_code || "").trim()) &&
+      baseDocumentKind !== "cfdi_invalid"
+    );
+  }
   const stepOneCanContinue = hasPedimentoNumber && baseDocumentKind !== "cfdi_invalid";
   const missingRequiredDocuments = useMemo(
     () => requiredDocuments.filter((document) => !effectiveFiles[document.documentType]),
@@ -373,7 +375,16 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
   }
 
   async function runAudit() {
-    if (!canRunAudit) {
+    console.log("AUDIT_READY", {
+      baseDocumentKind,
+      baseFile: Boolean(baseFile),
+      canRunAudit,
+      isRunning,
+      operation_code: xmlData.operation_code,
+      pedimento_number: xmlData.pedimento_number,
+    });
+
+    if (!hasMinimumAuditData()) {
       setError("Carga un XML o PDF de pedimento con número de pedimento detectado.");
       return;
     }
@@ -797,6 +808,7 @@ function ReviewStep({
       >
         {isRunning ? "Ejecutando auditoría..." : "Ejecutar auditoría"}
       </button>
+      {canRunAudit ? <p className="mt-3 text-sm font-medium text-emerald-700">Listo para ejecutar auditoría.</p> : null}
       {!canRunAudit && auditReadinessDebug.missingReasons.length > 0 ? (
         <p className="mt-3 text-sm font-medium text-amber-700">
           No se puede ejecutar porque falta: {auditReadinessDebug.missingReasons.join(" / ")}
