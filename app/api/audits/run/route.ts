@@ -47,10 +47,22 @@ export async function POST(request: Request) {
   }
 
   const auditApiUrl = process.env.AUDIT_API_URL?.trim();
+  const auditApiBaseUrl = process.env.AUDIT_API_BASE_URL?.trim();
   const auditApiKey = process.env.AUDIT_API_KEY?.trim();
 
-  if (!auditApiUrl || !auditApiKey) {
-    return NextResponse.json({ error: "AUDIT_API_NOT_CONFIGURED" }, { status: 500 });
+  console.info("AUDIT_RUN_CONFIG", {
+    auditApiBaseUrlPresent: Boolean(auditApiBaseUrl),
+    auditApiKeyLast4: auditApiKey ? auditApiKey.slice(-4) : null,
+    auditApiKeyPresent: Boolean(auditApiKey),
+    auditApiUrlPresent: Boolean(auditApiUrl),
+  });
+
+  if (!auditApiUrl) {
+    return NextResponse.json({ error: "AUDIT_API_URL_NOT_CONFIGURED" }, { status: 500 });
+  }
+
+  if (!auditApiKey) {
+    return NextResponse.json({ error: "AUDIT_API_KEY_NOT_CONFIGURED" }, { status: 500 });
   }
 
   const incomingFormData = await request.formData().catch(() => null);
@@ -61,6 +73,14 @@ export async function POST(request: Request) {
 
   const file = incomingFormData.get("file");
   const pedimentoXml = incomingFormData.get("pedimento_xml");
+  const supportFiles = incomingFormData.getAll("support_files").filter((supportFile) => supportFile instanceof File);
+
+  console.info("AUDIT_RUN_FORMDATA", {
+    formDataKeys: Array.from(incomingFormData.keys()),
+    mainFileName: file instanceof File ? file.name : null,
+    mainFileSize: file instanceof File ? file.size : null,
+    supportFilesCount: supportFiles.length,
+  });
 
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "AUDIT_FILE_REQUIRED" }, { status: 400 });
@@ -114,7 +134,7 @@ export async function POST(request: Request) {
     outboundFormData.append("pedimento_xml", pedimentoXml, pedimentoXml.name);
   }
 
-  for (const supportFile of incomingFormData.getAll("support_files")) {
+  for (const supportFile of supportFiles) {
     if (supportFile instanceof File) {
       outboundFormData.append("support_files", supportFile, supportFile.name);
     }
@@ -147,30 +167,55 @@ export async function POST(request: Request) {
     }
   }
 
-  const auditResponse = await fetch(auditApiUrl, {
-    body: outboundFormData,
-    cache: "no-store",
-    headers: {
-      Authorization: `Bearer ${auditApiKey}`,
-    },
-    method: "POST",
-  }).catch(() => null);
+  console.info("AUDIT_RUN_EXTERNAL_FETCH", {
+    url: auditApiUrl,
+  });
 
-  if (!auditResponse) {
-    return NextResponse.json({ error: "AUDIT_API_UNREACHABLE" }, { status: 502 });
-  }
+  let auditResponse: Response;
 
-  const payload = (await auditResponse.json().catch(() => null)) as AuditApiResponse | { detail?: string } | null;
-
-  if (!auditResponse.ok) {
+  try {
+    auditResponse = await fetch(auditApiUrl, {
+      body: outboundFormData,
+      cache: "no-store",
+      headers: {
+        Authorization: `Bearer ${auditApiKey}`,
+      },
+      method: "POST",
+    });
+  } catch (error) {
+    console.error("AUDIT_RUN_EXTERNAL_FETCH_ERROR", error);
     return NextResponse.json(
       {
-        detail: payload && "detail" in payload ? payload.detail : undefined,
-        error: "AUDIT_API_FAILED",
+        detail: errorDetail(error),
+        error: "EXTERNAL_AUDIT_FAILED",
+        externalStatus: null,
       },
       { status: 502 },
     );
   }
+
+  const responseText = await auditResponse.text().catch((error) => {
+    console.error("AUDIT_RUN_EXTERNAL_RESPONSE_READ_ERROR", error);
+    return "";
+  });
+
+  if (!auditResponse.ok) {
+    console.error("AUDIT_RUN_EXTERNAL_FAILED", {
+      body: responseText,
+      status: auditResponse.status,
+      url: auditApiUrl,
+    });
+    return NextResponse.json(
+      {
+        detail: responseText || auditResponse.statusText,
+        error: "EXTERNAL_AUDIT_FAILED",
+        externalStatus: auditResponse.status,
+      },
+      { status: 502 },
+    );
+  }
+
+  const payload = parseAuditApiResponse(responseText);
 
   const result = {
     ...normalizeAuditResult(payload as AuditApiResponse),
@@ -372,6 +417,34 @@ function normalizeAuditResult(payload: AuditApiResponse | null): NormalizedAudit
     risk_level: text(payload?.risk_level) || "unknown",
     top_critical_gaps: normalizeGaps(payload?.top_critical_gaps),
   };
+}
+
+function parseAuditApiResponse(value: string): AuditApiResponse | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(value) as AuditApiResponse;
+  } catch (error) {
+    console.error("AUDIT_RUN_EXTERNAL_JSON_PARSE_ERROR", {
+      body: value,
+      error,
+    });
+    return null;
+  }
+}
+
+function errorDetail(error: unknown) {
+  if (error instanceof Error) {
+    return `${error.name}: ${error.message}${error.stack ? `\n${error.stack}` : ""}`;
+  }
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
 }
 
 function normalizeGaps(value: unknown) {
