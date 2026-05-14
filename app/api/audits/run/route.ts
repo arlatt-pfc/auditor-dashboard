@@ -16,6 +16,7 @@ type NormalizedAuditResult = {
   executive_dictamen: string;
   loaded_documents?: unknown;
   missing_required_documents?: unknown;
+  missing_support_documents?: unknown;
   pedimento_data?: unknown;
   persisted: boolean;
   report_pdf_url: string | null;
@@ -26,6 +27,7 @@ type NormalizedAuditResult = {
 type AuditMetadata = {
   loaded_documents: unknown;
   missing_required_documents: unknown;
+  missing_support_documents: unknown;
   pedimento_data: unknown;
 };
 
@@ -97,6 +99,7 @@ export async function POST(request: Request) {
   const auditMetadata: AuditMetadata = {
     loaded_documents: parseJson(text(incomingFormData.get("loaded_documents"))),
     missing_required_documents: parseJson(text(incomingFormData.get("missing_required_documents"))),
+    missing_support_documents: parseJson(text(incomingFormData.get("missing_support_documents"))),
     pedimento_data: parseJson(text(incomingFormData.get("pedimento_data"))),
   };
 
@@ -134,6 +137,7 @@ export async function POST(request: Request) {
     "pedimento_xml_json",
     "pedimento_data",
     "missing_required_documents",
+    "missing_support_documents",
     "loaded_documents",
   ]) {
     const value = text(incomingFormData.get(metadataKey));

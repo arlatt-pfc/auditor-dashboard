@@ -153,6 +153,8 @@ const optionalDocuments: DocumentSlot[] = [
   { documentType: "forwarding_invoice", label: "Factura forwarding", accept: "application/pdf,.pdf" },
 ];
 
+const minimumSupportDocumentTypes = new Set<SupportDocumentType>(["commercial_invoice", "broker_expense_account"]);
+
 const detectedFieldLabels: { key: keyof PedimentoXmlData; label: string; numeric?: boolean }[] = [
   { key: "operation_code", label: "Código expediente" },
   { key: "pedimento_number", label: "Pedimento number" },
@@ -205,7 +207,6 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
   const normalizedOperationCode = (xmlData.operation_code || data.operation_code || "").trim();
   const hasPedimentoNumber = normalizedPedimentoNumber.length > 0;
   const isCfdiInvalid = baseDocumentKind === "cfdi_invalid";
-  const canRunAudit = hasMinimumAuditData() && !isRunning;
   const basePdfPedimentoFile = baseDocumentKind === "pdf_pedimento" ? baseFile : null;
   const effectiveFiles = useMemo(
     () => ({
@@ -214,11 +215,14 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     }),
     [basePdfPedimentoFile, files],
   );
+  const canRunAudit = hasMinimumAuditData() && !isRunning;
   const missingAuditReasons = [
     !baseFile ? "archivo base" : "",
     normalizedPedimentoNumber.length === 0 ? "pedimento" : "",
     normalizedOperationCode.length === 0 ? "código expediente" : "",
     isCfdiInvalid ? "documento válido" : "",
+    !effectiveFiles.commercial_invoice ? "factura comercial" : "",
+    !effectiveFiles.broker_expense_account ? "cuenta de gastos" : "",
   ].filter(Boolean);
   const auditReadinessDebug: AuditReadinessDebug = {
     baseDocumentKind,
@@ -238,12 +242,27 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
       Boolean(baseFile) &&
       Boolean((xmlData.pedimento_number || "").trim()) &&
       Boolean((xmlData.operation_code || "").trim()) &&
-      baseDocumentKind !== "cfdi_invalid"
+      baseDocumentKind !== "cfdi_invalid" &&
+      Boolean(effectiveFiles.commercial_invoice) &&
+      Boolean(effectiveFiles.broker_expense_account)
     );
   }
   const stepOneCanContinue = hasPedimentoNumber && baseDocumentKind !== "cfdi_invalid";
   const missingRequiredDocuments = useMemo(
-    () => requiredDocuments.filter((document) => !effectiveFiles[document.documentType]),
+    () =>
+      requiredDocuments.filter(
+        (document) => minimumSupportDocumentTypes.has(document.documentType) && !effectiveFiles[document.documentType],
+      ),
+    [effectiveFiles],
+  );
+  const missingSupportDocuments = useMemo(
+    () =>
+      [
+        ...requiredDocuments.filter(
+          (document) => document.documentType !== "pedimento" && !minimumSupportDocumentTypes.has(document.documentType),
+        ),
+        ...optionalDocuments,
+      ].filter((document) => !effectiveFiles[document.documentType]),
     [effectiveFiles],
   );
   const loadedDocuments = useMemo(
@@ -385,14 +404,14 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     });
 
     if (!hasMinimumAuditData()) {
-      setError("Carga un XML o PDF de pedimento con número de pedimento detectado.");
+      setError("Para ejecutar auditoría se requiere como mínimo pedimento, factura comercial y cuenta de gastos.");
       return;
     }
 
     const selectedBaseFile = baseFile;
 
     if (!selectedBaseFile) {
-      setError("Carga un XML o PDF de pedimento con número de pedimento detectado.");
+      setError("Para ejecutar auditoría se requiere como mínimo pedimento, factura comercial y cuenta de gastos.");
       return;
     }
 
@@ -421,6 +440,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     formData.append("pedimento_xml_json", JSON.stringify(xmlData));
     formData.append("pedimento_data", JSON.stringify(xmlData));
     formData.append("missing_required_documents", JSON.stringify(documentSummary(missingRequiredDocuments)));
+    formData.append("missing_support_documents", JSON.stringify(documentSummary(missingSupportDocuments)));
     formData.append("loaded_documents", JSON.stringify(documentSummary(loadedDocuments)));
 
     for (const [documentType, file] of Object.entries(files)) {
@@ -451,6 +471,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
   async function handleRunAuditClick() {
     if (!canRunAudit) {
       console.warn("Botón presionado pero canRunAudit es false");
+      setError("Para ejecutar auditoría se requiere como mínimo pedimento, factura comercial y cuenta de gastos.");
       return;
     }
 
@@ -508,6 +529,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
             isRunning={isRunning}
             loadedDocuments={loadedDocuments}
             missingRequiredDocuments={missingRequiredDocuments}
+            missingSupportDocuments={missingSupportDocuments}
             onRun={handleRunAuditClick}
             result={result}
             baseDocumentKind={baseDocumentKind}
@@ -739,6 +761,7 @@ function ReviewStep({
   isRunning,
   loadedDocuments,
   missingRequiredDocuments,
+  missingSupportDocuments,
   onRun,
   result,
   baseDocumentKind,
@@ -751,6 +774,7 @@ function ReviewStep({
   isRunning: boolean;
   loadedDocuments: LoadedDocument[];
   missingRequiredDocuments: DocumentSlot[];
+  missingSupportDocuments: DocumentSlot[];
   onRun: () => void | Promise<void>;
   result: AuditResult | null;
   baseDocumentKind: BaseDocumentKind;
@@ -789,13 +813,26 @@ function ReviewStep({
       </div>
       {missingRequiredDocuments.length > 0 ? (
         <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm font-semibold text-amber-900">Documentos faltantes</p>
-          <p className="mt-2 text-sm leading-6 text-amber-800">
-            La auditoría se ejecutará con brechas documentales por documentos no cargados. Puedes ejecutar la auditoría; los documentos faltantes se reportarán como hallazgos.
-          </p>
+          <p className="text-sm font-semibold text-amber-900">Evidencia mínima faltante</p>
+          <p className="mt-2 text-sm leading-6 text-amber-800">Para ejecutar auditoría se requiere como mínimo pedimento, factura comercial y cuenta de gastos.</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {missingRequiredDocuments.map((document) => (
               <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-amber-800" key={document.documentType}>
+                {document.label}
+              </span>
+            ))}
+          </div>
+        </section>
+      ) : null}
+      {missingSupportDocuments.length > 0 ? (
+        <section className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 p-4">
+          <p className="text-sm font-semibold text-sky-900">Expediente parcial</p>
+          <p className="mt-2 text-sm leading-6 text-sky-800">
+            La auditoría se ejecutará con expediente parcial. Los documentos no cargados se reportarán como brechas documentales.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {missingSupportDocuments.map((document) => (
+              <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-sky-800" key={document.documentType}>
                 {document.label}
               </span>
             ))}
@@ -811,8 +848,10 @@ function ReviewStep({
       ) : null}
       <button
         type="button"
-        onClick={onRun}
-        disabled={isRunning}
+        onClick={() => {
+          if (isRunning) return;
+          onRun();
+        }}
         style={{
           backgroundColor: "#0f172a",
           color: "#ffffff",
@@ -824,13 +863,9 @@ function ReviewStep({
       >
         {isRunning ? "Ejecutando auditoría..." : "Ejecutar auditoría"}
       </button>
-      <p className="mt-3 text-sm font-medium text-emerald-700">
-        Listo para ejecutar auditoría.
-      </p>
-      {!canRunAudit && !isRunning && auditReadinessDebug.missingReasons.length > 0 ? (
-        <p className="mt-3 text-sm font-medium text-amber-700">
-          No se puede ejecutar porque falta: {auditReadinessDebug.missingReasons.join(" / ")}
-        </p>
+      {canRunAudit ? <p className="mt-3 text-sm font-medium text-emerald-700">Listo para ejecutar auditoría.</p> : null}
+      {!canRunAudit && !isRunning ? (
+        <p className="mt-3 text-sm font-medium text-amber-700">Para ejecutar auditoría se requiere como mínimo pedimento, factura comercial y cuenta de gastos.</p>
       ) : null}
       {process.env.NODE_ENV !== "production" ? <AuditDebugPanel debug={auditReadinessDebug} /> : null}
     </div>
