@@ -821,11 +821,9 @@ function ReviewStep({
       >
         {isRunning ? "Ejecutando auditoría..." : "Ejecutar auditoría"}
       </button>
-      {canRunAudit && !isRunning ? (
-        <p className="mt-3 text-sm font-medium text-emerald-700">
-          Listo para ejecutar auditoría.
-        </p>
-      ) : null}
+      <p className="mt-3 text-sm font-medium text-emerald-700">
+        Listo para ejecutar auditoría.
+      </p>
       {!canRunAudit && !isRunning && auditReadinessDebug.missingReasons.length > 0 ? (
         <p className="mt-3 text-sm font-medium text-amber-700">
           No se puede ejecutar porque falta: {auditReadinessDebug.missingReasons.join(" / ")}
