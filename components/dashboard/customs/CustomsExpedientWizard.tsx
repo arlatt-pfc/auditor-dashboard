@@ -394,6 +394,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
   }
 
   async function runAudit() {
+    console.log("[customs.audit.run.start]");
     console.log("AUDIT_READY", {
       baseDocumentKind,
       baseFile: Boolean(baseFile),
@@ -450,15 +451,35 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
       }
     }
 
-    const response = await fetch("/api/audits/run", {
-      body: formData,
-      method: "POST",
-    }).catch(() => null);
+    console.log("[customs.audit.fetch.start]", {
+      endpoint: "/api/audits/run",
+      hasBaseFile: Boolean(baseFile),
+      operationCode: xmlData.operation_code,
+      pedimentoNumber: xmlData.pedimento_number,
+    });
+
+    let response: Response;
+
+    try {
+      response = await fetch("/api/audits/run", {
+        body: formData,
+        method: "POST",
+      });
+      console.log("[customs.audit.fetch.response]", {
+        ok: response.ok,
+        status: response.status,
+      });
+    } catch (error) {
+      console.error("[customs.audit.run.error]", error);
+      setIsRunning(false);
+      setError("No se pudo ejecutar la auditoria externa.");
+      return;
+    }
 
     setIsRunning(false);
 
-    if (!response?.ok) {
-      const payload = (await response?.json().catch(() => null)) as { detail?: string; error?: string } | null;
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { detail?: string; error?: string } | null;
       setError(payload?.detail ?? payload?.error ?? "No se pudo ejecutar la auditoria externa.");
       return;
     }
@@ -466,16 +487,6 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     const payload = (await response.json()) as AuditResult;
     setResult(payload);
     router.refresh();
-  }
-
-  async function handleRunAuditClick() {
-    if (!canRunAudit) {
-      console.warn("Botón presionado pero canRunAudit es false");
-      setError("Para ejecutar auditoría se requiere como mínimo pedimento, factura comercial y cuenta de gastos.");
-      return;
-    }
-
-    await runAudit();
   }
 
   return (
@@ -530,7 +541,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
             loadedDocuments={loadedDocuments}
             missingRequiredDocuments={missingRequiredDocuments}
             missingSupportDocuments={missingSupportDocuments}
-            onRun={handleRunAuditClick}
+            onRun={runAudit}
             result={result}
             baseDocumentKind={baseDocumentKind}
             baseFileName={baseFile?.name}
@@ -848,9 +859,12 @@ function ReviewStep({
       ) : null}
       <button
         type="button"
-        onClick={() => {
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          console.log("[customs.audit.button.click]", { isRunning });
           if (isRunning) return;
-          onRun();
+          void onRun();
         }}
         style={{
           backgroundColor: "#0f172a",
