@@ -210,6 +210,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
   const [files, setFiles] = useState<Partial<Record<SupportDocumentType, File>>>({});
   const [error, setError] = useState("");
   const [isRunning, setIsRunning] = useState(false);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [result, setResult] = useState<AuditResult | null>(null);
 
   const data = xmlData;
@@ -502,6 +503,46 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     router.refresh();
   }
 
+  async function generateReportPdf() {
+    if (!result) {
+      return;
+    }
+
+    setIsGeneratingPdf(true);
+    setError("");
+
+    const response = await fetch("/api/reports/customs-pdf", {
+      body: JSON.stringify({
+        auditResult: result,
+        loadedDocuments: documentSummary(loadedDocuments),
+        missingDocuments: documentSummary([...missingRequiredDocuments, ...missingSupportDocuments]),
+        pedimentoData: xmlData,
+      }),
+      headers: {
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    }).catch(() => null);
+
+    setIsGeneratingPdf(false);
+
+    if (!response?.ok) {
+      const payload = (await response?.json().catch(() => null)) as { error?: string } | null;
+      setError(payload?.error ?? "No se pudo generar el reporte PDF.");
+      return;
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = reportFilename(xmlData.operation_code || xmlData.pedimento_number);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="flex flex-wrap gap-2">
@@ -550,10 +591,12 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
             data={xmlData}
             error={error}
             canRunAudit={canRunAudit}
+            isGeneratingPdf={isGeneratingPdf}
             isRunning={isRunning}
             loadedDocuments={loadedDocuments}
             missingRequiredDocuments={missingRequiredDocuments}
             missingSupportDocuments={missingSupportDocuments}
+            onGenerateReport={generateReportPdf}
             onRun={runAudit}
             result={result}
             baseDocumentKind={baseDocumentKind}
@@ -782,10 +825,12 @@ function ReviewStep({
   canRunAudit,
   data,
   error,
+  isGeneratingPdf,
   isRunning,
   loadedDocuments,
   missingRequiredDocuments,
   missingSupportDocuments,
+  onGenerateReport,
   onRun,
   result,
   baseDocumentKind,
@@ -795,10 +840,12 @@ function ReviewStep({
   canRunAudit: boolean;
   data: PedimentoXmlData;
   error: string;
+  isGeneratingPdf: boolean;
   isRunning: boolean;
   loadedDocuments: LoadedDocument[];
   missingRequiredDocuments: DocumentSlot[];
   missingSupportDocuments: DocumentSlot[];
+  onGenerateReport: () => void | Promise<void>;
   onRun: () => void | Promise<void>;
   result: AuditResult | null;
   baseDocumentKind: BaseDocumentKind;
@@ -871,6 +918,16 @@ function ReviewStep({
             <p className="mt-2 leading-6">{result.executive_dictamen}</p>
           </div>
           <AuditFindingsCard findings={result.findings ?? []} />
+          <button
+            className="mt-4 rounded-2xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-900 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isGeneratingPdf}
+            onClick={() => {
+              void onGenerateReport();
+            }}
+            type="button"
+          >
+            {isGeneratingPdf ? "Generando reporte..." : "Generar Reporte PDF"}
+          </button>
         </>
       ) : null}
       <button
@@ -1123,6 +1180,11 @@ function documentSummary(documents: (DocumentSlot & { file?: File })[]) {
     file_name: document.file?.name ?? null,
     label: document.label,
   }));
+}
+
+function reportFilename(expediente: string) {
+  const safeExpediente = expediente.replace(/[^a-zA-Z0-9._-]+/g, "_") || "expediente";
+  return `Reporte_Auditoria_${safeExpediente}.pdf`;
 }
 
 function numberOrNull(value: string) {
