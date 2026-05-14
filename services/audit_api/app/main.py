@@ -3,9 +3,9 @@ from uuid import uuid4
 import json
 import shutil
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from .config import Settings, get_settings
 from .customs_parser import parse_uploaded_pedimento
@@ -14,21 +14,38 @@ from .schemas import AuditRunResponse, PedimentoParseResponse
 
 app = FastAPI(title="LDA Audit API", version="0.1.0")
 
+ALLOWED_CORS_ORIGINS = {
+    "https://auditor-dashboard.netlify.app",
+    "http://localhost:3000",
+}
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://auditor-dashboard.netlify.app",
-        "http://localhost:3000",
-    ],
+    allow_origins=list(ALLOWED_CORS_ORIGINS),
     allow_credentials=False,
-    allow_headers=["Authorization", "Content-Type", "X-LDA-Audit-Client"],
     allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
 )
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.options("/audit/run")
+async def audit_run_options(request: Request) -> Response:
+    origin = request.headers.get("origin", "")
+    allow_origin = origin if origin in ALLOWED_CORS_ORIGINS else "https://auditor-dashboard.netlify.app"
+
+    return Response(
+        status_code=status.HTTP_204_NO_CONTENT,
+        headers={
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Origin": allow_origin,
+        },
+    )
 
 
 @app.post("/audit/run", response_model=AuditRunResponse)
