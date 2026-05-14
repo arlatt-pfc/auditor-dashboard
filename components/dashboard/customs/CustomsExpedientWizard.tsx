@@ -211,6 +211,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
   const [error, setError] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [customsAuditId, setCustomsAuditId] = useState("");
   const [result, setResult] = useState<AuditResult | null>(null);
 
   const data = xmlData;
@@ -299,6 +300,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     setParseResult(null);
     setParseError(null);
     setResult(null);
+    setCustomsAuditId("");
   }
 
   async function extractBaseDocument() {
@@ -401,6 +403,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
       [documentType]: file,
     }));
     setResult(null);
+    setCustomsAuditId("");
     setError("");
   }
 
@@ -429,6 +432,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
 
     setIsRunning(true);
     setError("");
+    setCustomsAuditId("");
 
     const formData = new FormData();
     if (baseDocumentKind === "xml_pedimento") {
@@ -500,7 +504,33 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
 
     const payload = (await response.json()) as AuditResult;
     setResult(payload);
+    const persistedAuditId = await persistCustomsAudit(payload);
+    setCustomsAuditId(persistedAuditId);
     router.refresh();
+  }
+
+  async function persistCustomsAudit(auditResult: AuditResult) {
+    const response = await fetch("/api/customs/audits", {
+      body: JSON.stringify({
+        auditResult,
+        loadedDocuments: documentSummary(loadedDocuments),
+        missingDocuments: documentSummary([...missingRequiredDocuments, ...missingSupportDocuments]),
+        pedimentoData: xmlData,
+      }),
+      headers: {
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    }).catch(() => null);
+
+    if (!response?.ok) {
+      const payload = (await response?.json().catch(() => null)) as { error?: string } | null;
+      console.error("[customs.audit.persist.error]", payload?.error ?? "CUSTOMS_AUDIT_PERSIST_FAILED");
+      return "";
+    }
+
+    const payload = (await response.json().catch(() => null)) as { id?: string } | null;
+    return payload?.id ?? "";
   }
 
   async function generateReportPdf() {
@@ -591,6 +621,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
             data={xmlData}
             error={error}
             canRunAudit={canRunAudit}
+            customsAuditId={customsAuditId}
             isGeneratingPdf={isGeneratingPdf}
             isRunning={isRunning}
             loadedDocuments={loadedDocuments}
@@ -823,6 +854,7 @@ function DocumentsStep({
 function ReviewStep({
   auditReadinessDebug,
   canRunAudit,
+  customsAuditId,
   data,
   error,
   isGeneratingPdf,
@@ -838,6 +870,7 @@ function ReviewStep({
 }: {
   auditReadinessDebug: AuditReadinessDebug;
   canRunAudit: boolean;
+  customsAuditId: string;
   data: PedimentoXmlData;
   error: string;
   isGeneratingPdf: boolean;
@@ -916,6 +949,7 @@ function ReviewStep({
           <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
             <p className="font-semibold">{result.compliance_percent}% cumplimiento · Riesgo {result.risk_level}</p>
             <p className="mt-2 leading-6">{result.executive_dictamen}</p>
+            {customsAuditId ? <p className="mt-2 text-xs font-medium text-emerald-800">Auditoría guardada: {customsAuditId}</p> : null}
           </div>
           <AuditFindingsCard findings={result.findings ?? []} />
           <button
