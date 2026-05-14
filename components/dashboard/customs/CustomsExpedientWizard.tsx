@@ -88,10 +88,18 @@ type LoadedDocument = DocumentSlot & {
 type AuditResult = {
   compliance_percent: number;
   executive_dictamen: string;
+  findings?: (AuditFinding | string)[];
   persisted: boolean;
   report_pdf_url: string | null;
   risk_level: string;
   top_critical_gaps: string[];
+};
+
+type AuditFinding = {
+  description?: string;
+  recommendation?: string;
+  severity?: "Critical" | "High" | "Medium" | "Low" | string;
+  title?: string;
 };
 
 type AuditReadinessDebug = {
@@ -857,10 +865,13 @@ function ReviewStep({
       ) : null}
       {error ? <p className="mt-4 text-sm font-semibold text-red-700">{error}</p> : null}
       {result ? (
-        <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-          <p className="font-semibold">{result.compliance_percent}% cumplimiento · Riesgo {result.risk_level}</p>
-          <p className="mt-2 leading-6">{result.executive_dictamen}</p>
-        </div>
+        <>
+          <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+            <p className="font-semibold">{result.compliance_percent}% cumplimiento · Riesgo {result.risk_level}</p>
+            <p className="mt-2 leading-6">{result.executive_dictamen}</p>
+          </div>
+          <AuditFindingsCard findings={result.findings ?? []} />
+        </>
       ) : null}
       <button
         type="button"
@@ -908,6 +919,71 @@ function AuditDebugPanel({ debug }: { debug: AuditReadinessDebug }) {
       </div>
     </section>
   );
+}
+
+function AuditFindingsCard({ findings }: { findings: (AuditFinding | string)[] }) {
+  return (
+    <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+      <p className="text-sm font-semibold text-slate-900">Hallazgos preliminares</p>
+      {findings.length === 0 ? (
+        <p className="mt-3 text-sm text-slate-600">No se detectaron hallazgos preliminares.</p>
+      ) : (
+        <ul className="mt-3 space-y-3">
+          {findings.map((finding, index) => {
+            const normalizedFinding = normalizeAuditFinding(finding, index);
+
+            return (
+              <li className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm" key={`${normalizedFinding.title}-${index}`}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${severityClass(normalizedFinding.severity)}`}>
+                    {normalizedFinding.severity}
+                  </span>
+                  <span className="font-semibold text-slate-900">{normalizedFinding.title}</span>
+                </div>
+                <p className="mt-2 leading-6 text-slate-700">{normalizedFinding.description}</p>
+                <p className="mt-2 leading-6 text-slate-600">
+                  <span className="font-semibold text-slate-800">Recomendación: </span>
+                  {normalizedFinding.recommendation}
+                </p>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function normalizeAuditFinding(finding: AuditFinding | string, index: number): Required<AuditFinding> {
+  if (typeof finding === "string") {
+    return {
+      description: finding,
+      recommendation: "Revisar evidencia documental y registrar acción correctiva.",
+      severity: "Medium",
+      title: `Hallazgo ${index + 1}`,
+    };
+  }
+
+  return {
+    description: finding.description || "Sin descripción disponible.",
+    recommendation: finding.recommendation || "Sin recomendación disponible.",
+    severity: finding.severity || "Medium",
+    title: finding.title || `Hallazgo ${index + 1}`,
+  };
+}
+
+function severityClass(severity?: string) {
+  switch ((severity || "").toLowerCase()) {
+    case "critical":
+      return "bg-red-100 text-red-800";
+    case "high":
+      return "bg-orange-100 text-orange-800";
+    case "low":
+      return "bg-blue-100 text-blue-800";
+    case "medium":
+    default:
+      return "bg-yellow-100 text-yellow-800";
+  }
 }
 
 function DebugRow({ label, value }: { label: string; value: string }) {
