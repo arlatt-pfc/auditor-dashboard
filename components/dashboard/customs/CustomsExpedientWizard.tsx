@@ -448,6 +448,15 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     router.refresh();
   }
 
+  async function handleRunAuditClick() {
+    if (!canRunAudit) {
+      console.warn("Botón presionado pero canRunAudit es false");
+      return;
+    }
+
+    await runAudit();
+  }
+
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="flex flex-wrap gap-2">
@@ -499,7 +508,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
             isRunning={isRunning}
             loadedDocuments={loadedDocuments}
             missingRequiredDocuments={missingRequiredDocuments}
-            onRun={runAudit}
+            onRun={handleRunAuditClick}
             result={result}
             baseDocumentKind={baseDocumentKind}
             baseFileName={baseFile?.name}
@@ -742,7 +751,7 @@ function ReviewStep({
   isRunning: boolean;
   loadedDocuments: LoadedDocument[];
   missingRequiredDocuments: DocumentSlot[];
-  onRun: () => void;
+  onRun: () => void | Promise<void>;
   result: AuditResult | null;
   baseDocumentKind: BaseDocumentKind;
   baseFileName?: string;
@@ -801,15 +810,23 @@ function ReviewStep({
         </div>
       ) : null}
       <button
-        className="mt-5 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-        disabled={!canRunAudit}
-        onClick={onRun}
         type="button"
+        onClick={onRun}
+        disabled={isRunning}
+        className={`mt-5 rounded-2xl px-5 py-3 text-sm font-semibold text-white transition ${
+          isRunning
+            ? "bg-slate-300 cursor-not-allowed"
+            : "bg-slate-900 hover:bg-slate-800"
+        }`}
       >
         {isRunning ? "Ejecutando auditoría..." : "Ejecutar auditoría"}
       </button>
-      {canRunAudit ? <p className="mt-3 text-sm font-medium text-emerald-700">Listo para ejecutar auditoría.</p> : null}
-      {!canRunAudit && auditReadinessDebug.missingReasons.length > 0 ? (
+      {canRunAudit && !isRunning ? (
+        <p className="mt-3 text-sm font-medium text-emerald-700">
+          Listo para ejecutar auditoría.
+        </p>
+      ) : null}
+      {!canRunAudit && !isRunning && auditReadinessDebug.missingReasons.length > 0 ? (
         <p className="mt-3 text-sm font-medium text-amber-700">
           No se puede ejecutar porque falta: {auditReadinessDebug.missingReasons.join(" / ")}
         </p>
