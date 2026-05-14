@@ -153,7 +153,7 @@ export default async function CustomsCompliancePage({ searchParams }: CustomsCom
                       <div className="flex flex-wrap gap-2">
                         <Link
                           className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
-                          href={`/dashboard/customs-compliance/${encodeURIComponent(text(audit.operation_code, audit.id))}`}
+                          href={`/dashboard/customs-compliance/${encodeURIComponent(text(audit.id, audit.operation_code))}`}
                         >
                           Ver
                         </Link>
