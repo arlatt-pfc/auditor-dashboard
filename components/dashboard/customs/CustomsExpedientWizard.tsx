@@ -80,6 +80,11 @@ type DocumentSlot = {
   label: string;
 };
 
+type LoadedDocument = DocumentSlot & {
+  file?: File;
+  reusedFromBase?: boolean;
+};
+
 type AuditResult = {
   compliance_percent: number;
   executive_dictamen: string;
@@ -87,6 +92,19 @@ type AuditResult = {
   report_pdf_url: string | null;
   risk_level: string;
   top_critical_gaps: string[];
+};
+
+type AuditReadinessDebug = {
+  baseDocumentKind: BaseDocumentKind;
+  baseFileExists: boolean;
+  baseFileName: string;
+  canRunAudit: boolean;
+  isCfdiInvalid: boolean;
+  isParsing: boolean;
+  isRunning: boolean;
+  missingReasons: string[];
+  operationCode: string;
+  pedimentoNumber: string;
 };
 
 const emptyXmlData: PedimentoXmlData = {
@@ -182,30 +200,60 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
   const [isRunning, setIsRunning] = useState(false);
   const [result, setResult] = useState<AuditResult | null>(null);
 
-  const hasPedimentoNumber = xmlData.pedimento_number.trim().length > 0;
+  const data = xmlData;
+  const normalizedPedimentoNumber = (xmlData.pedimento_number || data.pedimento_number || "").trim();
+  const normalizedOperationCode = (xmlData.operation_code || data.operation_code || "").trim();
+  const hasPedimentoNumber = normalizedPedimentoNumber.length > 0;
   const isCfdiInvalid = baseDocumentKind === "cfdi_invalid";
   const isUploading = isParsing;
   const canRunAudit =
-    !!baseFile &&
-    !!xmlData.pedimento_number &&
-    !!xmlData.operation_code &&
+    Boolean(baseFile) &&
+    normalizedPedimentoNumber.length > 0 &&
+    normalizedOperationCode.length > 0 &&
     !isCfdiInvalid &&
     !isUploading &&
     !isRunning;
+  const basePdfPedimentoFile = baseDocumentKind === "pdf_pedimento" ? baseFile : null;
+  const effectiveFiles = useMemo(
+    () => ({
+      ...files,
+      ...(basePdfPedimentoFile && !files.pedimento ? { pedimento: basePdfPedimentoFile } : {}),
+    }),
+    [basePdfPedimentoFile, files],
+  );
+  const missingAuditReasons = [
+    !baseFile ? "archivo base" : "",
+    normalizedPedimentoNumber.length === 0 ? "pedimento" : "",
+    normalizedOperationCode.length === 0 ? "código expediente" : "",
+    isCfdiInvalid ? "documento válido" : "",
+  ].filter(Boolean);
+  const auditReadinessDebug: AuditReadinessDebug = {
+    baseDocumentKind,
+    baseFileExists: Boolean(baseFile),
+    baseFileName: baseFile?.name ?? "",
+    canRunAudit,
+    isCfdiInvalid,
+    isParsing,
+    isRunning,
+    missingReasons: missingAuditReasons,
+    operationCode: normalizedOperationCode,
+    pedimentoNumber: normalizedPedimentoNumber,
+  };
   const stepOneCanContinue = hasPedimentoNumber && baseDocumentKind !== "cfdi_invalid";
   const missingRequiredDocuments = useMemo(
-    () => requiredDocuments.filter((document) => !files[document.documentType]),
-    [files],
+    () => requiredDocuments.filter((document) => !effectiveFiles[document.documentType]),
+    [effectiveFiles],
   );
   const loadedDocuments = useMemo(
     () =>
       [...requiredDocuments, ...optionalDocuments]
         .map((document) => ({
           ...document,
-          file: files[document.documentType],
+          file: effectiveFiles[document.documentType],
+          reusedFromBase: document.documentType === "pedimento" && Boolean(basePdfPedimentoFile) && !files.pedimento,
         }))
         .filter((document) => document.file),
-    [files],
+    [basePdfPedimentoFile, effectiveFiles, files.pedimento],
   );
 
   function selectBaseDocument(file?: File) {
@@ -262,13 +310,6 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     const payload = (await response.json()) as RemoteParseResponse;
     const documentKind = kindFromDocumentType(payload.document_type);
     setBaseDocumentKind(documentKind);
-
-    if (documentKind === "pdf_pedimento") {
-      setFiles((current) => ({
-        ...current,
-        pedimento: file,
-      }));
-    }
 
     if (!payload.is_supported_as_primary_document) {
       setXmlData(emptyXmlData);
@@ -428,10 +469,19 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
             parseResult={parseResult}
           />
         ) : null}
-        {step === 2 ? <DocumentsStep documents={requiredDocuments} files={files} onChange={updateFile} title="Documentos soporte requeridos" /> : null}
-        {step === 3 ? <DocumentsStep documents={optionalDocuments} files={files} onChange={updateFile} title="Documentos opcionales / preferenciales" /> : null}
+        {step === 2 ? (
+          <DocumentsStep
+            basePdfPedimentoFile={basePdfPedimentoFile}
+            documents={requiredDocuments}
+            files={effectiveFiles}
+            onChange={updateFile}
+            title="Documentos soporte requeridos"
+          />
+        ) : null}
+        {step === 3 ? <DocumentsStep basePdfPedimentoFile={null} documents={optionalDocuments} files={files} onChange={updateFile} title="Documentos opcionales / preferenciales" /> : null}
         {step === 4 ? (
           <ReviewStep
+            auditReadinessDebug={auditReadinessDebug}
             data={xmlData}
             error={error}
             canRunAudit={canRunAudit}
@@ -610,11 +660,13 @@ function ParseErrorCard({ error, onManualCapture }: { error: ParseError; onManua
 }
 
 function DocumentsStep({
+  basePdfPedimentoFile,
   documents,
   files,
   onChange,
   title,
 }: {
+  basePdfPedimentoFile: File | null;
   documents: DocumentSlot[];
   files: Partial<Record<SupportDocumentType, File>>;
   onChange: (documentType: SupportDocumentType, file?: File) => void;
@@ -623,25 +675,44 @@ function DocumentsStep({
   return (
     <div>
       <h3 className="text-xl font-semibold text-slate-900">{title}</h3>
+      {basePdfPedimentoFile ? (
+        <p className="mt-2 text-sm leading-6 text-slate-500">
+          El PDF del pedimento cargado en el Paso 1 se utilizará como documento base y soporte documental.
+        </p>
+      ) : null}
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
-        {documents.map((document) => (
-          <label className="block rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4" key={document.documentType}>
-            <span className="text-sm font-semibold text-slate-800">{document.label}</span>
-            <input
-              accept={document.accept}
-              className="mt-4 block w-full text-sm text-slate-600 file:mr-4 file:rounded-xl file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-slate-800"
-              onChange={(event) => onChange(document.documentType, event.target.files?.[0])}
-              type="file"
-            />
-            <span className="mt-3 block text-xs text-slate-500">{files[document.documentType]?.name ?? "Pendiente de carga"}</span>
-          </label>
-        ))}
+        {documents.map((document) => {
+          const isReusedPedimentoPdf = document.documentType === "pedimento" && Boolean(basePdfPedimentoFile);
+
+          return (
+            <label
+              className={`block rounded-2xl border border-dashed p-4 ${
+                isReusedPedimentoPdf ? "border-emerald-200 bg-emerald-50" : "border-slate-300 bg-slate-50"
+              }`}
+              key={document.documentType}
+            >
+              <span className={`text-sm font-semibold ${isReusedPedimentoPdf ? "text-emerald-900" : "text-slate-800"}`}>{document.label}</span>
+              {isReusedPedimentoPdf ? (
+                <span className="mt-3 block text-sm font-medium text-emerald-800">Usando el PDF cargado en Paso 1</span>
+              ) : (
+                <input
+                  accept={document.accept}
+                  className="mt-4 block w-full text-sm text-slate-600 file:mr-4 file:rounded-xl file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-slate-800"
+                  onChange={(event) => onChange(document.documentType, event.target.files?.[0])}
+                  type="file"
+                />
+              )}
+              <span className="mt-3 block text-xs text-slate-500">{files[document.documentType]?.name ?? "Pendiente de carga"}</span>
+            </label>
+          );
+        })}
       </div>
     </div>
   );
 }
 
 function ReviewStep({
+  auditReadinessDebug,
   canRunAudit,
   data,
   error,
@@ -653,11 +724,12 @@ function ReviewStep({
   baseDocumentKind,
   baseFileName,
 }: {
+  auditReadinessDebug: AuditReadinessDebug;
   canRunAudit: boolean;
   data: PedimentoXmlData;
   error: string;
   isRunning: boolean;
-  loadedDocuments: (DocumentSlot & { file?: File })[];
+  loadedDocuments: LoadedDocument[];
   missingRequiredDocuments: DocumentSlot[];
   onRun: () => void;
   result: AuditResult | null;
@@ -689,6 +761,7 @@ function ReviewStep({
               <div className="rounded-xl bg-white px-3 py-2 text-sm text-slate-600" key={document.documentType}>
                 <span className="font-medium text-slate-900">{document.label}</span>
                 <span className="mt-1 block text-xs">{document.file?.name}</span>
+                {document.reusedFromBase ? <span className="mt-1 block text-xs font-semibold text-emerald-700">Reutilizado desde Paso 1</span> : null}
               </div>
             ))}
           </div>
@@ -724,6 +797,40 @@ function ReviewStep({
       >
         {isRunning ? "Ejecutando auditoría..." : "Ejecutar auditoría"}
       </button>
+      {!canRunAudit && auditReadinessDebug.missingReasons.length > 0 ? (
+        <p className="mt-3 text-sm font-medium text-amber-700">
+          No se puede ejecutar porque falta: {auditReadinessDebug.missingReasons.join(" / ")}
+        </p>
+      ) : null}
+      {process.env.NODE_ENV !== "production" ? <AuditDebugPanel debug={auditReadinessDebug} /> : null}
+    </div>
+  );
+}
+
+function AuditDebugPanel({ debug }: { debug: AuditReadinessDebug }) {
+  return (
+    <section className="mt-4 rounded-2xl border border-slate-300 bg-slate-50 p-4">
+      <p className="text-sm font-semibold text-slate-900">Debug ejecución auditoría</p>
+      <div className="mt-3 grid gap-2 text-xs text-slate-700 md:grid-cols-2">
+        <DebugRow label="baseFile exists" value={String(debug.baseFileExists)} />
+        <DebugRow label="baseFileName" value={debug.baseFileName || "(vacío)"} />
+        <DebugRow label="pedimento_number" value={debug.pedimentoNumber || "(vacío)"} />
+        <DebugRow label="operation_code" value={debug.operationCode || "(vacío)"} />
+        <DebugRow label="baseDocumentKind" value={debug.baseDocumentKind || "(vacío)"} />
+        <DebugRow label="isCfdiInvalid" value={String(debug.isCfdiInvalid)} />
+        <DebugRow label="isParsing" value={String(debug.isParsing)} />
+        <DebugRow label="isRunning" value={String(debug.isRunning)} />
+        <DebugRow label="canRunAudit" value={String(debug.canRunAudit)} />
+      </div>
+    </section>
+  );
+}
+
+function DebugRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl bg-white px-3 py-2">
+      <span className="font-semibold text-slate-500">{label}</span>
+      <span className="mt-1 block break-words font-mono text-slate-900">{value}</span>
     </div>
   );
 }
