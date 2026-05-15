@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, Response
 from .config import Settings, get_settings
 from .commercial_invoice_parser import parse_commercial_invoice_pdf
 from .customs_parser import parse_uploaded_pedimento
+from .customs_rules_engine import evaluate_customs_rules
 from .pipeline_runner import PipelineExecutionError, run_pipeline
 from .schemas import AuditRunResponse, PedimentoParseResponse
 
@@ -143,10 +144,12 @@ async def run_audit(
         invoice_details, invoice_parse_errors = _parse_commercial_invoice_support_files(saved_support_file_records, support_dir)
         metadata["invoice_details"] = invoice_details
         metadata["commercial_invoice_parse_errors"] = invoice_parse_errors
+        metadata["customs_rule_findings"] = evaluate_customs_rules(metadata)
 
         print(
             "[audit.run] saved files",
             {
+                "customs_rule_findings_count": len(metadata["customs_rule_findings"]),
                 "main_file_path": str(pdf_path),
                 "support_files": saved_support_files,
                 "invoice_details_count": len(invoice_details),
@@ -334,17 +337,47 @@ def _customs_mvp_result(metadata: dict[str, object], saved_support_files: list[s
     loaded_documents = metadata.get("loaded_documents")
     invoice_details = metadata.get("invoice_details")
     invoice_parse_errors = metadata.get("commercial_invoice_parse_errors")
+    customs_rule_findings = metadata.get("customs_rule_findings")
     missing_count = _metadata_count(missing_required) + _metadata_count(missing_support)
-    findings = []
+    findings: list[dict[str, object]] = []
 
     if missing_count:
-        findings.append("Expediente parcial: existen documentos no cargados que deben tratarse como brechas documentales.")
+        findings.append(
+            _finding(
+                "DOCUMENTARY_GAPS_DECLARED",
+                "Expediente parcial",
+                "Expediente parcial: existen documentos no cargados que deben tratarse como brechas documentales.",
+                "Integrar los documentos faltantes o documentar la brecha en el expediente.",
+                "Medium",
+            )
+        )
 
     if isinstance(invoice_parse_errors, list):
-        findings.extend(str(error) for error in invoice_parse_errors if error)
+        findings.extend(
+            _finding(
+                "COMMERCIAL_INVOICE_TEXT_EXTRACTION",
+                "Factura comercial requiere revisión",
+                str(error),
+                "Revisar manualmente la factura comercial o cargar una versión con texto extraíble.",
+                "Medium",
+            )
+            for error in invoice_parse_errors
+            if error
+        )
+
+    if isinstance(customs_rule_findings, list):
+        findings.extend(finding for finding in customs_rule_findings if isinstance(finding, dict))
 
     if not findings:
-        findings.append("Expediente recibido para revisión documental aduanera sin brechas documentales declaradas.")
+        findings.append(
+            _finding(
+                "CUSTOMS_RULES_NO_GAPS",
+                "Sin brechas preliminares",
+                "Expediente recibido para revisión documental aduanera sin brechas documentales declaradas.",
+                "Conservar evidencia y continuar con revisión especializada cuando aplique.",
+                "Low",
+            )
+        )
 
     return {
         "compliance_percent": max(0, 100 - (missing_count * 8)),
@@ -360,7 +393,7 @@ def _customs_mvp_result(metadata: dict[str, object], saved_support_files: list[s
         "missing_support_documents": missing_support,
         "report_pdf_url": None,
         "risk_level": "Medium" if missing_count else "Low",
-        "top_critical_gaps": findings,
+        "top_critical_gaps": [str(finding.get("description") or finding.get("title") or "") for finding in findings],
     }
 
 
@@ -376,6 +409,19 @@ def _unique_strings(values: list[str]) -> list[str]:
         seen.add(normalized)
 
     return unique
+
+
+def _finding(rule_code: str, title: str, description: str, recommendation: str, severity: str) -> dict[str, object]:
+    return {
+        "category": "documentary_compliance",
+        "description": description,
+        "evidence": {},
+        "legal_basis": "",
+        "recommendation": recommendation,
+        "rule_code": rule_code,
+        "severity": severity,
+        "title": title,
+    }
 
 
 def _customs_error(code: str, status_code: int, message: str) -> JSONResponse:

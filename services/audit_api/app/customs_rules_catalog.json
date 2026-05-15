@@ -1,0 +1,62 @@
+[
+  {
+    "rule_code": "INV_PED_VALUE_MATCH",
+    "rule_name": "Coincidencia de valor factura vs pedimento",
+    "category": "valuation",
+    "severity": "High",
+    "enabled": true,
+    "parameters": {
+      "allowed_variance_percent": 3
+    },
+    "legal_basis": "Ley Aduanera arts. 64-78; reglas generales de valoración aduanera aplicables.",
+    "recommendation_template": "Validar que el valor comercial de facturas coincida razonablemente con el valor declarado en pedimento. Diferencia detectada: {variance_percent}%."
+  },
+  {
+    "rule_code": "CERTIFICATE_OF_ORIGIN_REQUIRED",
+    "rule_name": "Certificado de origen requerido",
+    "category": "origin",
+    "severity": "Medium",
+    "enabled": true,
+    "parameters": {
+      "required_when_tariff_preference_claimed": true
+    },
+    "legal_basis": "T-MEC y reglas de certificación de origen aplicables cuando se solicita trato preferencial.",
+    "recommendation_template": "Integrar certificado o certificación de origen cuando exista trato preferencial o riesgo de origen."
+  },
+  {
+    "rule_code": "COVE_REQUIRED",
+    "rule_name": "COVE requerido",
+    "category": "digital_documents",
+    "severity": "Medium",
+    "enabled": true,
+    "parameters": {
+      "required_when_invoices_present": true
+    },
+    "legal_basis": "Reglas de Comercio Exterior aplicables a transmisión de valor y comercialización mediante COVE.",
+    "recommendation_template": "Adjuntar acuse o detalle COVE asociado a las facturas comerciales declaradas."
+  },
+  {
+    "rule_code": "INCOTERM_CONSISTENCY",
+    "rule_name": "Consistencia de Incoterm",
+    "category": "commercial_terms",
+    "severity": "Low",
+    "enabled": true,
+    "parameters": {
+      "allowed_incoterms": ["EXW", "FCA", "FAS", "FOB", "CFR", "CIF", "CPT", "CIP", "DAP", "DPU", "DDP"]
+    },
+    "legal_basis": "Incoterms ICC vigentes y soporte documental de términos de compraventa.",
+    "recommendation_template": "Verificar que el Incoterm de factura sea válido y consistente con transporte, valor declarado y gastos incrementables."
+  },
+  {
+    "rule_code": "DATA_SHEET_AUTHENTICITY",
+    "rule_name": "Autenticidad de hoja de datos",
+    "category": "classification_support",
+    "severity": "Low",
+    "enabled": true,
+    "parameters": {
+      "required_when_tariff_items_present": true
+    },
+    "legal_basis": "Obligación de conservar documentación soporte para clasificación arancelaria y descripción de mercancías.",
+    "recommendation_template": "Conservar ficha técnica, catálogo o especificación emitida por proveedor/fabricante para soportar clasificación arancelaria."
+  }
+]
