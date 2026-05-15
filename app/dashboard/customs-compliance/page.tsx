@@ -12,6 +12,8 @@ type CustomsCompliancePageProps = {
 };
 
 type CustomsAuditRow = {
+  audit_group_id?: string | null;
+  audit_version?: number | string | null;
   broker_name?: string | null;
   compliance_percent?: number | string | null;
   created_at?: string | null;
@@ -27,6 +29,7 @@ type CustomsAuditRow = {
   pedimento_number?: string | null;
   result_json?: unknown;
   risk_level?: string | null;
+  is_latest?: boolean | null;
 };
 
 type Filters = {
@@ -67,6 +70,7 @@ export default async function CustomsCompliancePage({ searchParams }: CustomsCom
   });
   const audits = rows.filter((row) => matchesFilters(row, filters));
   const kpis = buildKpis(audits);
+  const versionGroups = buildVersionGroups(audits);
 
   return (
     <PageShell currentPath={currentPath}>
@@ -138,6 +142,10 @@ export default async function CustomsCompliancePage({ searchParams }: CustomsCom
                     <td className="py-4 pr-4 text-slate-600">{formatDate(audit.created_at)}</td>
                     <td className="py-4 pr-4">
                       <div className="font-medium text-slate-900">{text(audit.operation_code, "Sin expediente")}</div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">v{number(audit.audit_version) || 1}</span>
+                        {audit.is_latest ? <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">Última versión</span> : null}
+                      </div>
                       <div className="mt-1 text-xs text-slate-500">{text(audit.id)}</div>
                     </td>
                     <td className="py-4 pr-4 text-slate-600">{text(audit.pedimento_number, "Pendiente")}</td>
@@ -177,6 +185,34 @@ export default async function CustomsCompliancePage({ searchParams }: CustomsCom
                 ) : null}
               </tbody>
             </table>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h3 className="text-xl font-semibold text-slate-900">Historial de versiones por expediente</h3>
+          <div className="mt-5 grid gap-3">
+            {versionGroups.map((group) => (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4" key={group.key}>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">{group.operationCode}</p>
+                    <p className="mt-1 text-xs text-slate-500">{group.items.length} versiones</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {group.items.map((audit) => (
+                      <Link
+                        className={`rounded-full px-3 py-1 text-xs font-semibold ${audit.is_latest ? "bg-emerald-100 text-emerald-800" : "bg-white text-slate-700"}`}
+                        href={`/dashboard/customs-compliance/${encodeURIComponent(text(audit.id, audit.operation_code))}`}
+                        key={text(audit.id, audit.operation_code)}
+                      >
+                        v{number(audit.audit_version) || 1}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {versionGroups.length === 0 ? <p className="text-sm text-slate-500">No hay versiones registradas.</p> : null}
           </div>
         </section>
       </div>
@@ -245,6 +281,21 @@ function buildKpis(audits: CustomsAuditRow[]) {
     { label: "Riesgo alto", value: String(highRisk), hint: "High/Critical" },
     { label: "Riesgo medio", value: String(mediumRisk), hint: "Medium" },
   ];
+}
+
+function buildVersionGroups(audits: CustomsAuditRow[]) {
+  const groups = new Map<string, CustomsAuditRow[]>();
+
+  for (const audit of audits) {
+    const key = text(audit.audit_group_id, audit.operation_code, audit.id, "sin-grupo");
+    groups.set(key, [...(groups.get(key) ?? []), audit]);
+  }
+
+  return Array.from(groups.entries()).map(([key, items]) => ({
+    items: items.sort((first, second) => number(second.audit_version) - number(first.audit_version)),
+    key,
+    operationCode: text(items[0]?.operation_code, "Sin expediente"),
+  }));
 }
 
 function normalizeFilters(searchParams: Record<string, string | string[] | undefined>): Filters {

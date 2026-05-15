@@ -12,6 +12,8 @@ type CustomsAuditDetailPageProps = {
 };
 
 type CustomsAuditRow = {
+  audit_group_id?: string | null;
+  audit_version?: number | string | null;
   broker_name?: string | null;
   compliance_percent?: number | string | null;
   created_at?: string | null;
@@ -20,14 +22,17 @@ type CustomsAuditRow = {
   findings?: unknown;
   id?: string | null;
   importer_name?: string | null;
+  is_latest?: boolean | null;
   loaded_documents?: unknown;
   missing_documents?: unknown;
   operation_code?: string | null;
+  parent_audit_id?: string | null;
   pedimento_data?: unknown;
   pedimento_number?: string | null;
   result_json?: unknown;
   risk_level?: string | null;
   status?: string | null;
+  superseded_by?: string | null;
 };
 
 type FindingView = {
@@ -69,6 +74,7 @@ export default async function CustomsAuditDetailPage({ params }: CustomsAuditDet
     return <AuditNotFound />;
   }
 
+  const versionRows = await getVersionHistory(audit, auth?.accessToken);
   const loadedDocuments = arrayFrom(audit.loaded_documents);
   const missingDocuments = arrayFrom(audit.missing_documents);
   const findings = normalizeFindings(audit.findings);
@@ -107,8 +113,8 @@ export default async function CustomsAuditDetailPage({ params }: CustomsAuditDet
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <KpiCard label="Cumplimiento" value={formatPercent(audit.compliance_percent)} hint="estimado" />
           <KpiCard label="Nivel de riesgo" value={text(audit.risk_level, "unknown")} hint={text(audit.status, "completed")} />
+          <KpiCard label="Versión" value={`v${number(audit.audit_version) || 1}`} hint={audit.is_latest ? "Última versión" : "Histórica"} />
           <KpiCard label="Documentos cargados" value={String(loadedDocuments.length)} hint="recibidos" />
-          <KpiCard label="Brechas" value={String(missingDocuments.length)} hint="documentales" />
         </section>
 
         <section className="grid gap-6 xl:grid-cols-[1fr_0.9fr]">
@@ -124,6 +130,7 @@ export default async function CustomsAuditDetailPage({ params }: CustomsAuditDet
                   ["Fecha de ejecución", formatDate(audit.created_at)],
                   ["Cumplimiento", formatPercent(audit.compliance_percent)],
                   ["Nivel de riesgo", text(audit.risk_level, "unknown")],
+                  ["Versión", `v${number(audit.audit_version) || 1}${audit.is_latest ? " · Última versión" : ""}`],
                 ]}
               />
               <p className="mt-5 text-sm leading-6 text-slate-700">{text(audit.executive_dictamen, "Sin dictamen ejecutivo disponible.")}</p>
@@ -131,6 +138,7 @@ export default async function CustomsAuditDetailPage({ params }: CustomsAuditDet
 
             <DocumentsCard title="Documentos cargados" documents={loadedDocuments} emptyText="No se registraron documentos cargados." />
             <DocumentsCard title="Brechas documentales" documents={missingDocuments} emptyText="No se registraron brechas documentales." />
+            <VersionHistoryCard audits={versionRows} />
           </div>
 
           <div className="space-y-6">
@@ -148,6 +156,27 @@ export default async function CustomsAuditDetailPage({ params }: CustomsAuditDet
       </div>
     </PageShell>
   );
+}
+
+async function getVersionHistory(audit: CustomsAuditRow, accessToken?: string) {
+  const auditGroupId = text(audit.audit_group_id);
+
+  if (!auditGroupId) {
+    return [audit];
+  }
+
+  const rows = await supabaseSelect<CustomsAuditRow>("customs_audits", {
+    accessToken,
+    eq: {
+      audit_group_id: auditGroupId,
+    },
+    order: {
+      ascending: false,
+      column: "audit_version",
+    },
+  });
+
+  return rows.length > 0 ? rows : [audit];
 }
 
 function AuditNotFound() {
@@ -223,6 +252,30 @@ function DocumentsCard({ documents, emptyText, title }: { documents: unknown[]; 
           })}
         </div>
       )}
+    </DetailCard>
+  );
+}
+
+function VersionHistoryCard({ audits }: { audits: CustomsAuditRow[] }) {
+  return (
+    <DetailCard title="Historial de versiones">
+      <div className="space-y-3">
+        {audits.map((audit) => (
+          <Link
+            className={`block rounded-2xl border p-4 text-sm transition hover:bg-slate-50 ${
+              audit.is_latest ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-white"
+            }`}
+            href={`/dashboard/customs-compliance/${encodeURIComponent(text(audit.id, audit.operation_code))}`}
+            key={text(audit.id, audit.operation_code)}
+          >
+            <span className="flex flex-wrap items-center justify-between gap-3">
+              <span className="font-semibold text-slate-900">v{number(audit.audit_version) || 1}</span>
+              {audit.is_latest ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">Última versión</span> : null}
+            </span>
+            <span className="mt-2 block text-slate-600">{formatDate(audit.created_at)} · {formatPercent(audit.compliance_percent)} · {text(audit.risk_level, "unknown")}</span>
+          </Link>
+        ))}
+      </div>
     </DetailCard>
   );
 }

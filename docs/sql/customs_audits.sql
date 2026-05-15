@@ -23,13 +23,31 @@ create table if not exists public.customs_audits (
   pedimento_data jsonb default '{}'::jsonb,
   result_json jsonb default '{}'::jsonb,
   pdf_storage_path text,
+  audit_group_id uuid,
+  audit_version int default 1,
+  parent_audit_id uuid references public.customs_audits(id),
+  superseded_by uuid references public.customs_audits(id),
+  is_latest boolean default true,
+  rerun_reason text,
+  documents_added jsonb default '[]'::jsonb,
   status text default 'completed'
 );
+
+alter table public.customs_audits
+  add column if not exists audit_group_id uuid,
+  add column if not exists audit_version int default 1,
+  add column if not exists parent_audit_id uuid references public.customs_audits(id),
+  add column if not exists superseded_by uuid references public.customs_audits(id),
+  add column if not exists is_latest boolean default true,
+  add column if not exists rerun_reason text,
+  add column if not exists documents_added jsonb default '[]'::jsonb;
 
 create index if not exists idx_customs_audits_operation_code on public.customs_audits(operation_code);
 create index if not exists idx_customs_audits_pedimento_number on public.customs_audits(pedimento_number);
 create index if not exists idx_customs_audits_importer_name on public.customs_audits(importer_name);
 create index if not exists idx_customs_audits_created_at_desc on public.customs_audits(created_at desc);
+create index if not exists idx_customs_audits_audit_group_id on public.customs_audits(audit_group_id);
+create index if not exists idx_customs_audits_latest on public.customs_audits(audit_group_id, is_latest);
 
 alter table public.customs_audits enable row level security;
 
