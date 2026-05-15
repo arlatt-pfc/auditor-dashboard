@@ -13,23 +13,30 @@ type PdfRequest = {
 };
 
 type AuditResult = {
+  audit_group_id?: string;
+  audit_version?: number | string;
   compliance_percent?: number | string;
   executive_dictamen?: string;
   findings?: (AuditFinding | string)[];
+  is_latest?: boolean;
   risk_level?: string;
   top_critical_gaps?: string[];
 };
 
 type AuditFinding = {
   description?: string;
+  evidence?: Record<string, unknown>;
   recommendation?: string;
   severity?: string;
   title?: string;
 };
 
 type PedimentoData = {
+  audit_group_id?: string;
+  audit_version?: number | string;
   broker_name?: string;
   importer_name?: string;
+  is_latest?: boolean;
   operation_code?: string;
   pedimento_full?: string;
   pedimento_number?: string;
@@ -88,6 +95,9 @@ export async function POST(request: Request) {
   addPage(context);
   sectionTitle(context, "Resumen Ejecutivo");
   keyValue(context, "Expediente", pedimento.operation_code);
+  keyValue(context, "Versión de auditoría", auditVersion(audit, pedimento));
+  keyValue(context, "Audit Group ID", audit.audit_group_id || pedimento.audit_group_id);
+  keyValue(context, "Estado de versión", isLatestVersion(audit, pedimento) ? "Última versión" : "Versión histórica");
   keyValue(context, "Pedimento", pedimento.pedimento_full || pedimento.pedimento_number);
   keyValue(context, "Referencia", pedimento.reference);
   keyValue(context, "Importador", pedimento.importer_name);
@@ -110,6 +120,10 @@ export async function POST(request: Request) {
     for (const finding of findings) {
       ensureSpace(context, 92);
       drawText(context, `${finding.severity} - ${finding.title}`, { font: context.boldFont, size: 10, color: severityColor(finding.severity) });
+      const variance = varianceLine(finding.evidence);
+      if (variance) {
+        paragraph(context, variance, { size: 9, indent: 12 });
+      }
       paragraph(context, finding.description, { size: 9, indent: 12 });
       paragraph(context, `Recomendación: ${finding.recommendation}`, { size: 9, indent: 12 });
       context.y -= 5;
@@ -300,6 +314,7 @@ function normalizeFindings(findings: AuditResult["findings"]) {
     if (typeof finding === "string") {
       return {
         description: finding,
+        evidence: {},
         recommendation: "Revisar evidencia documental y registrar acción correctiva.",
         severity: "Medium",
         title: `Hallazgo ${index + 1}`,
@@ -308,11 +323,36 @@ function normalizeFindings(findings: AuditResult["findings"]) {
 
     return {
       description: clean(finding.description) || "Sin descripción disponible.",
+      evidence: finding.evidence && typeof finding.evidence === "object" ? finding.evidence : {},
       recommendation: clean(finding.recommendation) || "Sin recomendación disponible.",
       severity: clean(finding.severity) || "Medium",
       title: clean(finding.title) || `Hallazgo ${index + 1}`,
     };
   });
+}
+
+function auditVersion(audit: AuditResult, pedimento: PedimentoData) {
+  const version = clean(audit.audit_version) || clean(pedimento.audit_version);
+  return version ? `v${version.replace(/^v/i, "")}` : "";
+}
+
+function isLatestVersion(audit: AuditResult, pedimento: PedimentoData) {
+  return audit.is_latest === true || pedimento.is_latest === true;
+}
+
+function varianceLine(evidence: Record<string, unknown> | undefined) {
+  if (!evidence) {
+    return "";
+  }
+
+  const variancePercent = clean(evidence.variance_percent);
+  const varianceAmount = clean(evidence.variance_amount) || clean(evidence.difference);
+  const parts = [
+    variancePercent ? `Diferencia porcentual: ${variancePercent}%` : "",
+    varianceAmount ? `Diferencia monto: ${varianceAmount}` : "",
+  ].filter(Boolean);
+
+  return parts.join(" · ");
 }
 
 function documentLines(documents: DocumentSummary[] | undefined) {

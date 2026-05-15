@@ -348,9 +348,12 @@ function auditResult(audit: CustomsAuditRow) {
   const result = asRecord(audit.result_json);
 
   return {
+    audit_group_id: audit.audit_group_id,
+    audit_version: audit.audit_version,
     compliance_percent: audit.compliance_percent,
     executive_dictamen: audit.executive_dictamen,
     findings: arrayFrom(audit.findings),
+    is_latest: audit.is_latest,
     risk_level: audit.risk_level,
     top_critical_gaps: arrayFrom(result.top_critical_gaps),
     ...result,

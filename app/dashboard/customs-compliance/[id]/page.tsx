@@ -52,9 +52,11 @@ type CustomsAuditLogRow = {
 
 type FindingView = {
   description: string;
+  evidence: Record<string, unknown>;
   recommendation: string;
   severity: string;
   title: string;
+  variance: { label: string; value: string }[];
 };
 
 const currentPath = "/dashboard/customs-compliance";
@@ -459,6 +461,15 @@ function FindingsCard({ findings }: { findings: FindingView[] }) {
                 <span className="font-semibold text-slate-900">{finding.title}</span>
               </div>
               <p className="mt-3 leading-6 text-slate-700">{finding.description}</p>
+              {finding.variance.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {finding.variance.map((item) => (
+                    <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200" key={item.label}>
+                      {item.label}: {item.value}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               <p className="mt-3 leading-6 text-slate-600">
                 <span className="font-semibold text-slate-800">Recomendación: </span>
                 {finding.recommendation}
@@ -574,29 +585,45 @@ function normalizeFindings(value: unknown): FindingView[] {
     if (typeof finding === "string") {
       return {
         description: finding,
+        evidence: {},
         recommendation: "Revisar evidencia documental y registrar acción correctiva.",
         severity: "Medium",
         title: `Hallazgo ${index + 1}`,
+        variance: [],
       };
     }
 
     const row = asRecord(finding);
+    const evidence = asRecord(row.evidence);
     return {
       description: text(row.description, "Sin descripción disponible."),
+      evidence,
       recommendation: text(row.recommendation, "Sin recomendación disponible."),
       severity: text(row.severity, "Medium"),
       title: text(row.title, `Hallazgo ${index + 1}`),
+      variance: varianceItems(evidence),
     };
   });
+}
+
+function varianceItems(evidence: Record<string, unknown>) {
+  const varianceAmount = evidence.variance_amount ?? evidence.difference;
+  return [
+    ["Diferencia %", evidence.variance_percent],
+    ["Diferencia", varianceAmount],
+  ].flatMap(([label, value]) => (typeof value === "number" || typeof value === "string" ? [{ label: String(label), value: String(value) }] : []));
 }
 
 function auditResult(audit: CustomsAuditRow) {
   const result = asRecord(audit.result_json);
 
   return {
+    audit_group_id: audit.audit_group_id,
+    audit_version: audit.audit_version,
     compliance_percent: audit.compliance_percent,
     executive_dictamen: audit.executive_dictamen,
     findings: arrayFrom(audit.findings),
+    is_latest: audit.is_latest,
     risk_level: audit.risk_level,
     top_critical_gaps: arrayFrom(result.top_critical_gaps),
     ...result,

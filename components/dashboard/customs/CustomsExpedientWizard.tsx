@@ -108,6 +108,7 @@ type AuditResult = {
 
 type AuditFinding = {
   description?: string;
+  evidence?: Record<string, unknown>;
   recommendation?: string;
   severity?: "Critical" | "High" | "Medium" | "Low" | string;
   title?: string;
@@ -762,7 +763,12 @@ export function CustomsExpedientWizard({ canExecute, rerunContext }: { canExecut
         auditResult: result,
         loadedDocuments: documentSummary(loadedDocuments),
         missingDocuments: documentSummary([...missingRequiredDocuments, ...missingSupportDocuments]),
-        pedimentoData: xmlData,
+        pedimentoData: {
+          ...xmlData,
+          audit_group_id: rerunContext?.auditGroupId,
+          audit_version: rerunContext?.nextAuditVersion,
+          is_latest: true,
+        },
       }),
       headers: {
         "Content-Type": "application/json",
@@ -1396,13 +1402,14 @@ function ReviewStep({
           </div>
           <AuditFindingsCard findings={result.findings ?? []} />
           <button
-            className="mt-4 rounded-2xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-900 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-4 inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
             disabled={isGeneratingPdf}
             onClick={() => {
               void onGenerateReport();
             }}
             type="button"
           >
+            <PdfButtonIcon />
             {isGeneratingPdf ? "Generando reporte..." : "Generar Reporte PDF"}
           </button>
         </>
@@ -1513,6 +1520,15 @@ function AuditFindingsCard({ findings }: { findings: (AuditFinding | string)[] }
                   <span className="font-semibold text-slate-900">{normalizedFinding.title}</span>
                 </div>
                 <p className="mt-2 leading-6 text-slate-700">{normalizedFinding.description}</p>
+                {normalizedFinding.variance.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {normalizedFinding.variance.map((item) => (
+                      <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200" key={item.label}>
+                        {item.label}: {item.value}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
                 <p className="mt-2 leading-6 text-slate-600">
                   <span className="font-semibold text-slate-800">Recomendación: </span>
                   {normalizedFinding.recommendation}
@@ -1526,22 +1542,47 @@ function AuditFindingsCard({ findings }: { findings: (AuditFinding | string)[] }
   );
 }
 
-function normalizeAuditFinding(finding: AuditFinding | string, index: number): Required<AuditFinding> {
+function PdfButtonIcon() {
+  return (
+    <svg aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+      <path d="M14 2v6h6" />
+      <path d="M9 15h6" />
+      <path d="M9 18h4" />
+    </svg>
+  );
+}
+
+function normalizeAuditFinding(finding: AuditFinding | string, index: number): Required<Omit<AuditFinding, "evidence">> & { evidence: Record<string, unknown>; variance: { label: string; value: string }[] } {
   if (typeof finding === "string") {
     return {
       description: finding,
+      evidence: {},
       recommendation: "Revisar evidencia documental y registrar acción correctiva.",
       severity: "Medium",
       title: `Hallazgo ${index + 1}`,
+      variance: [],
     };
   }
 
+  const evidence = finding.evidence && typeof finding.evidence === "object" ? finding.evidence : {};
+
   return {
     description: finding.description || "Sin descripción disponible.",
+    evidence,
     recommendation: finding.recommendation || "Sin recomendación disponible.",
     severity: finding.severity || "Medium",
     title: finding.title || `Hallazgo ${index + 1}`,
+    variance: varianceItems(evidence),
   };
+}
+
+function varianceItems(evidence: Record<string, unknown>) {
+  const varianceAmount = evidence.variance_amount ?? evidence.difference;
+  return [
+    ["Diferencia %", evidence.variance_percent],
+    ["Diferencia", varianceAmount],
+  ].flatMap(([label, value]) => (typeof value === "number" || typeof value === "string" ? [{ label: String(label), value: String(value) }] : []));
 }
 
 function severityClass(severity?: string) {

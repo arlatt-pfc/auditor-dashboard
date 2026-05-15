@@ -2,13 +2,14 @@
 
 type CustomsAuditPdfButtonProps = {
   auditResult: Record<string, unknown>;
+  className?: string;
   expediente: string;
   loadedDocuments: unknown[];
   missingDocuments: unknown[];
   pedimentoData: Record<string, unknown>;
 };
 
-export function CustomsAuditPdfButton({ auditResult, expediente, loadedDocuments, missingDocuments, pedimentoData }: CustomsAuditPdfButtonProps) {
+export function CustomsAuditPdfButton({ auditResult, className, expediente, loadedDocuments, missingDocuments, pedimentoData }: CustomsAuditPdfButtonProps) {
   async function downloadPdf() {
     const response = await fetch("/api/reports/customs-pdf", {
       body: JSON.stringify({
@@ -40,14 +41,26 @@ export function CustomsAuditPdfButton({ auditResult, expediente, loadedDocuments
 
   return (
     <button
-      className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+      className={className ?? "inline-flex items-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-slate-800"}
       onClick={() => {
         void downloadPdf();
       }}
       type="button"
     >
+      <PdfIcon />
       PDF
     </button>
+  );
+}
+
+function PdfIcon() {
+  return (
+    <svg aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+      <path d="M14 2v6h6" />
+      <path d="M9 15h6" />
+      <path d="M9 18h4" />
+    </svg>
   );
 }
 

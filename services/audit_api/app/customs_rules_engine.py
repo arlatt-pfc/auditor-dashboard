@@ -70,7 +70,7 @@ def _evaluate_invoice_pedimento_value(rule: dict[str, Any], context: dict[str, A
     if len(invoice_details) > 1 and _rule_enabled("MULTI_INVOICE_TOTAL_MATCH"):
         return None
 
-    invoice_total = sum(_number(_record(invoice).get("usd_value")) or _number(_record(invoice).get("amount")) for invoice in invoice_details)
+    invoice_total = sum(_invoice_usd_amount(_record(invoice)) for invoice in invoice_details)
 
     if not invoice_details or not commercial_value_usd or invoice_total <= 0:
         return _finding(
@@ -94,6 +94,7 @@ def _evaluate_invoice_pedimento_value(rule: dict[str, Any], context: dict[str, A
             "allowed_variance_percent": allowed_variance,
             "commercial_value_usd": commercial_value_usd,
             "invoice_total": round(invoice_total, 2),
+            "variance_amount": round(invoice_total - commercial_value_usd, 2),
             "variance_percent": round(variance_percent, 2),
         },
     )
@@ -106,7 +107,7 @@ def _evaluate_multi_invoice_total_match(rule: dict[str, Any], context: dict[str,
     if len(invoice_details) <= 1:
         return None
 
-    total_invoices = sum(_number(_record(invoice).get("amount")) for invoice in invoice_details)
+    total_invoices = sum(_invoice_usd_amount(_record(invoice)) for invoice in invoice_details)
     pedimento_value = _number(pedimento_data.get("commercial_value_usd"))
     tolerance = _tolerance_percent(rule)
 
@@ -123,8 +124,8 @@ def _evaluate_multi_invoice_total_match(rule: dict[str, Any], context: dict[str,
             },
         )
 
-    difference = total_invoices - pedimento_value
-    variance_percent = abs(difference) / pedimento_value * 100
+    variance_amount = total_invoices - pedimento_value
+    variance_percent = abs(variance_amount) / pedimento_value * 100
 
     if variance_percent <= tolerance:
         return None
@@ -134,11 +135,11 @@ def _evaluate_multi_invoice_total_match(rule: dict[str, Any], context: dict[str,
         f"El total de facturas detectadas ({total_invoices:.2f}) no coincide con el valor en dólares del pedimento ({pedimento_value:.2f}).",
         _template(rule, variance_percent=f"{variance_percent:.2f}"),
         evidence={
-            "difference": round(difference, 2),
             "invoice_count": len(invoice_details),
             "pedimento_value": round(pedimento_value, 2),
             "tolerance": tolerance,
             "total_invoices": round(total_invoices, 2),
+            "variance_amount": round(variance_amount, 2),
             "variance_percent": round(variance_percent, 2),
         },
     )
@@ -513,6 +514,26 @@ def _number(value: Any) -> float:
             return 0.0
 
     return 0.0
+
+
+def _invoice_usd_amount(invoice: dict[str, Any]) -> float:
+    usd_value = _number(invoice.get("usd_value"))
+    if usd_value > 0:
+        return usd_value
+
+    amount = _number(invoice.get("amount"))
+    if amount <= 0:
+        return 0.0
+
+    currency = str(invoice.get("currency") or "").upper()
+    if currency in {"", "USD"}:
+        return amount
+
+    exchange_rate = _number(invoice.get("exchange_rate")) or _number(invoice.get("exchange_factor"))
+    if currency == "MXN" and exchange_rate > 0:
+        return amount / exchange_rate
+
+    return amount
 
 
 def _rule_enabled(rule_code: str) -> bool:

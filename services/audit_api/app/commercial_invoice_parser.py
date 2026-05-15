@@ -21,6 +21,10 @@ MONEY_RE = r"([$]?\s*[\d,]+(?:\.\d{2,})?)"
 CURRENCY_RE = re.compile(r"\b(USD|MXN|EUR|CAD|GBP|JPY|CNY)\b", re.I)
 INCOTERM_RE = re.compile(r"\b(EXW|FCA|FAS|FOB|CFR|CIF|CPT|CIP|DAP|DPU|DDP)\b", re.I)
 COVE_RE = re.compile(r"\b(COVE[A-Z0-9]{6,30})\b", re.I)
+EXCHANGE_RATE_RE = re.compile(
+    r"\b(?:exchange\s*rate|rate\s*of\s*exchange|tipo\s*(?:de\s*)?cambio|t\.?\s*cambio|tc)\s*[:=.-]?\s*([0-9]+(?:\.[0-9]+)?)",
+    re.I,
+)
 
 
 @dataclass
@@ -228,13 +232,19 @@ def _dedupe_close_positions(positions: list[int]) -> list[int]:
 
 def _parse_invoice_segment(text: str, source_file: str, page_start: int, page_end: int) -> dict[str, object | None]:
     invoice_number = _invoice_number(text)
+    invoice_date = _invoice_date(text)
+    currency = _currency(text)
+    amount = _amount(text)
+    exchange_rate = _exchange_rate(text)
 
     return {
         "invoice_number": invoice_number,
         "provider_name": _provider_name(text),
-        "invoice_date": _invoice_date(text),
-        "currency": _currency(text),
-        "amount": _amount(text),
+        "date": invoice_date,
+        "invoice_date": invoice_date,
+        "currency": currency,
+        "amount": amount,
+        "exchange_rate": exchange_rate,
         "incoterm": _incoterm(text),
         "cove": _cove(text),
         "source_file": source_file,
@@ -273,18 +283,34 @@ def _provider_name(text: str) -> str:
 
 
 def _invoice_date(text: str) -> str:
-    labeled = re.search(rf"\b(?:invoice\s+date|date|fecha)\s*[:.-]?\s*{DATE_RE}", text, re.I)
-    if labeled:
-        return labeled.group(1)
+    labeled_patterns = [
+        rf"\b(?:invoice\s+date|fecha\s+(?:de\s+)?factura|fecha)\s*[:.-]?\s*{DATE_RE}",
+        rf"\b(?:date)\s*{DATE_RE}",
+    ]
+
+    for pattern in labeled_patterns:
+        labeled = re.search(pattern, text, re.I)
+        if labeled:
+            return labeled.group(1)
 
     fallback = re.search(DATE_RE, text)
     return fallback.group(1) if fallback else ""
 
 
 def _currency(text: str) -> str:
-    labeled = re.search(r"\b(?:currency|moneda)\s*[:.-]?\s*(USD|MXN|EUR|CAD|GBP|JPY|CNY)\b", text, re.I)
+    labeled = re.search(r"\b(?:currency|moneda|moneda\s+fact)\s*[:.-]?\s*(USD|MXN|EUR|CAD|GBP|JPY|CNY)\b", text, re.I)
     if labeled:
         return labeled.group(1).upper()
+
+    symbol_match = re.search(r"\b(US\$|USD\$|MX\$|CAD\$)\s*[\d,]+(?:\.\d{2,})?", text, re.I)
+    if symbol_match:
+        symbol = symbol_match.group(1).upper()
+        if symbol in {"US$", "USD$"}:
+            return "USD"
+        if symbol == "MX$":
+            return "MXN"
+        if symbol == "CAD$":
+            return "CAD"
 
     match = CURRENCY_RE.search(text)
     return match.group(1).upper() if match else ""
@@ -292,16 +318,36 @@ def _currency(text: str) -> str:
 
 def _amount(text: str) -> float | None:
     patterns = [
-        rf"\b(?:grand\s+total|invoice\s+total|total\s+invoice|amount\s+due|total\s+amount|total|importe\s+total)\s*[:.-]?\s*(?:USD|MXN|EUR|CAD|GBP)?\s*{MONEY_RE}",
-        rf"\b(?:val\.\s*mon\.\s*fact|valor\s+factura|amount)\s*[:.-]?\s*(?:USD|MXN|EUR|CAD|GBP)?\s*{MONEY_RE}",
+        rf"\b(?:grand\s+total|invoice\s+total|total\s+invoice|amount\s+due|total\s+amount|importe\s+total)\s*[:.-]?\s*(?:USD|MXN|EUR|CAD|GBP|US\$|MX\$)?\s*{MONEY_RE}",
+        rf"\b(?:val\.\s*mon\.\s*fact|valor\s+(?:moneda\s+)?factura|valor\s+factura|amount)\s*[:.-]?\s*(?:USD|MXN|EUR|CAD|GBP|US\$|MX\$)?\s*{MONEY_RE}",
+        rf"\b(?:total)\s*[:.-]?\s*(?:USD|MXN|EUR|CAD|GBP|US\$|MX\$)\s*{MONEY_RE}",
     ]
 
     for pattern in patterns:
-        matches = list(re.finditer(pattern, text, re.I))
+        matches = [match for match in re.finditer(pattern, text, re.I) if _amount_context_is_valid(text, match.start())]
         if matches:
             return _money(matches[-1].group(1))
 
+    table_match = re.search(
+        rf"\b(?:num\.?\s*factura|invoice\s*(?:no\.?|number)).{{0,220}}?\b(?:val\.?\s*mon\.?\s*fact|amount|total).{{0,180}}?{MONEY_RE}",
+        text,
+        re.I | re.S,
+    )
+    if table_match:
+        return _money(table_match.group(1))
+
     return None
+
+
+def _exchange_rate(text: str) -> float | None:
+    match = EXCHANGE_RATE_RE.search(text)
+    if not match:
+        return None
+
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
 
 
 def _incoterm(text: str) -> str:
@@ -327,6 +373,11 @@ def _money(value: str) -> float | None:
         return float(normalized)
     except ValueError:
         return None
+
+
+def _amount_context_is_valid(text: str, start: int) -> bool:
+    context = text[max(0, start - 40):start].upper()
+    return not any(blocked in context for blocked in ("TAX ID", "RFC", "PHONE", "TEL", "ZIP", "POSTAL"))
 
 
 def _clean_token(value: str) -> str:
