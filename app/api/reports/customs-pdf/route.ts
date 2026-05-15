@@ -37,6 +37,7 @@ type PedimentoData = {
 type DocumentSummary = {
   document_type?: string;
   file_name?: string | null;
+  files?: { file_index?: number; file_name?: string | null }[];
   label?: string;
 };
 
@@ -321,7 +322,16 @@ function documentLines(documents: DocumentSummary[] | undefined) {
     return [];
   }
 
-  return documents.map((document) => `${clean(document.label) || clean(document.document_type) || "Documento"}${document.file_name ? ` - ${document.file_name}` : ""}`);
+  return documents.flatMap((document) => {
+    const label = clean(document.label) || clean(document.document_type) || "Documento";
+    const files = Array.isArray(document.files) ? document.files : [];
+
+    if (files.length > 0) {
+      return files.map((file) => `${label} - ${clean(file.file_name) || "Sin archivo"}`);
+    }
+
+    return [`${label}${document.file_name ? ` - ${document.file_name}` : ""}`];
+  });
 }
 
 function severityColor(severity: string) {

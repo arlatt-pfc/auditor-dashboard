@@ -246,13 +246,34 @@ function DocumentsCard({ documents, emptyText, title }: { documents: unknown[]; 
             return (
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4" key={`${text(row.document_type, row.label, "documento")}-${index}`}>
                 <p className="text-sm font-semibold text-slate-900">{text(row.label, row.document_type, `Documento ${index + 1}`)}</p>
-                <p className="mt-2 break-words text-sm text-slate-500">{text(row.file_name, "Sin archivo")}</p>
+                <DocumentFileList document={row} />
               </div>
             );
           })}
         </div>
       )}
     </DetailCard>
+  );
+}
+
+function DocumentFileList({ document }: { document: Record<string, unknown> }) {
+  const files = arrayFrom(document.files);
+
+  if (files.length === 0) {
+    return <p className="mt-2 break-words text-sm text-slate-500">{text(document.file_name, "Sin archivo")}</p>;
+  }
+
+  return (
+    <ul className="mt-2 space-y-1">
+      {files.map((file, index) => {
+        const row = asRecord(file);
+        return (
+          <li className="break-words text-sm text-slate-500" key={`${text(row.file_name, "archivo")}-${index}`}>
+            {text(row.file_name, `Archivo ${index + 1}`)}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

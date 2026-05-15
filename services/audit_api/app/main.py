@@ -62,6 +62,7 @@ async def run_audit(
     loaded_documents: str = Form(""),
     missing_required_documents: str = Form(""),
     missing_support_documents: str = Form(""),
+    support_file_metadata: str = Form(""),
     authorization: str | None = Header(default=None),
     x_lda_audit_client: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
@@ -74,6 +75,7 @@ async def run_audit(
             "missing_required_documents": _parse_json_metadata(missing_required_documents),
             "missing_support_documents": _parse_json_metadata(missing_support_documents),
             "pedimento_data": _parse_json_metadata(pedimento_data),
+            "support_file_metadata": _parse_json_metadata(support_file_metadata),
         }
         missing_documents_count = _metadata_count(metadata["missing_required_documents"]) + _metadata_count(metadata["missing_support_documents"])
 

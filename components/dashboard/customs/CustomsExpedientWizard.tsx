@@ -81,7 +81,7 @@ type DocumentSlot = {
 };
 
 type LoadedDocument = DocumentSlot & {
-  file?: File;
+  files?: File[];
   reusedFromBase?: boolean;
 };
 
@@ -207,7 +207,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
   const [parseResult, setParseResult] = useState<ParseResponse | null>(null);
   const [parseError, setParseError] = useState<ParseError | null>(null);
   const [isParsing, setIsParsing] = useState(false);
-  const [files, setFiles] = useState<Partial<Record<SupportDocumentType, File>>>({});
+  const [files, setFiles] = useState<Partial<Record<SupportDocumentType, File[]>>>({});
   const [error, setError] = useState("");
   const [isRunning, setIsRunning] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
@@ -223,7 +223,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
   const effectiveFiles = useMemo(
     () => ({
       ...files,
-      ...(basePdfPedimentoFile && !files.pedimento ? { pedimento: basePdfPedimentoFile } : {}),
+      ...(basePdfPedimentoFile && !hasFiles(files.pedimento) ? { pedimento: [basePdfPedimentoFile] } : {}),
     }),
     [basePdfPedimentoFile, files],
   );
@@ -233,8 +233,8 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     normalizedPedimentoNumber.length === 0 ? "pedimento" : "",
     normalizedOperationCode.length === 0 ? "código expediente" : "",
     isCfdiInvalid ? "documento válido" : "",
-    !effectiveFiles.commercial_invoice ? "factura comercial" : "",
-    !effectiveFiles.broker_expense_account ? "cuenta de gastos" : "",
+    !hasFiles(effectiveFiles.commercial_invoice) ? "factura comercial" : "",
+    !hasFiles(effectiveFiles.broker_expense_account) ? "cuenta de gastos" : "",
   ].filter(Boolean);
   const auditReadinessDebug: AuditReadinessDebug = {
     baseDocumentKind,
@@ -255,15 +255,15 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
       Boolean((xmlData.pedimento_number || "").trim()) &&
       Boolean((xmlData.operation_code || "").trim()) &&
       baseDocumentKind !== "cfdi_invalid" &&
-      Boolean(effectiveFiles.commercial_invoice) &&
-      Boolean(effectiveFiles.broker_expense_account)
+      hasFiles(effectiveFiles.commercial_invoice) &&
+      hasFiles(effectiveFiles.broker_expense_account)
     );
   }
   const stepOneCanContinue = hasPedimentoNumber && baseDocumentKind !== "cfdi_invalid";
   const missingRequiredDocuments = useMemo(
     () =>
       requiredDocuments.filter(
-        (document) => minimumSupportDocumentTypes.has(document.documentType) && !effectiveFiles[document.documentType],
+        (document) => minimumSupportDocumentTypes.has(document.documentType) && !hasFiles(effectiveFiles[document.documentType]),
       ),
     [effectiveFiles],
   );
@@ -274,7 +274,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
           (document) => document.documentType !== "pedimento" && !minimumSupportDocumentTypes.has(document.documentType),
         ),
         ...optionalDocuments,
-      ].filter((document) => !effectiveFiles[document.documentType]),
+      ].filter((document) => !hasFiles(effectiveFiles[document.documentType])),
     [effectiveFiles],
   );
   const loadedDocuments = useMemo(
@@ -282,10 +282,10 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
       [...requiredDocuments, ...optionalDocuments]
         .map((document) => ({
           ...document,
-          file: effectiveFiles[document.documentType],
-          reusedFromBase: document.documentType === "pedimento" && Boolean(basePdfPedimentoFile) && !files.pedimento,
+          files: effectiveFiles[document.documentType],
+          reusedFromBase: document.documentType === "pedimento" && Boolean(basePdfPedimentoFile) && !hasFiles(files.pedimento),
         }))
-        .filter((document) => document.file),
+        .filter((document) => hasFiles(document.files)),
     [basePdfPedimentoFile, effectiveFiles, files.pedimento],
   );
 
@@ -397,11 +397,29 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     setError("");
   }
 
-  function updateFile(documentType: SupportDocumentType, file?: File) {
+  function updateFiles(documentType: SupportDocumentType, selectedFiles: File[]) {
+    if (selectedFiles.length === 0) {
+      return;
+    }
+
     setFiles((current) => ({
       ...current,
-      [documentType]: file,
+      [documentType]: [...(current[documentType] ?? []), ...selectedFiles],
     }));
+    setResult(null);
+    setCustomsAuditId("");
+    setError("");
+  }
+
+  function removeFile(documentType: SupportDocumentType, fileIndex: number) {
+    setFiles((current) => {
+      const nextFiles = (current[documentType] ?? []).filter((_, index) => index !== fileIndex);
+
+      return {
+        ...current,
+        [documentType]: nextFiles,
+      };
+    });
     setResult(null);
     setCustomsAuditId("");
     setError("");
@@ -439,7 +457,8 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
       formData.append("pedimento_xml", selectedBaseFile, selectedBaseFile.name);
     }
 
-    formData.append("file", files.pedimento ?? selectedBaseFile, files.pedimento?.name ?? selectedBaseFile.name);
+    const selectedPedimentoFile = files.pedimento?.[0] ?? selectedBaseFile;
+    formData.append("file", selectedPedimentoFile, selectedPedimentoFile.name);
     formData.append("audit_topic", `Customs Compliance - Expediente ${xmlData.operation_code}`);
     formData.append("engine_id", "CUSTOMS_COMPLIANCE");
     formData.append("operation_id", xmlData.operation_code);
@@ -458,9 +477,10 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     formData.append("missing_required_documents", JSON.stringify(documentSummary(missingRequiredDocuments)));
     formData.append("missing_support_documents", JSON.stringify(documentSummary(missingSupportDocuments)));
     formData.append("loaded_documents", JSON.stringify(documentSummary(loadedDocuments)));
+    formData.append("support_file_metadata", JSON.stringify(supportFileMetadata(files)));
 
-    for (const [documentType, file] of Object.entries(files)) {
-      if (file) {
+    for (const [documentType, documentFiles] of Object.entries(files)) {
+      for (const file of documentFiles ?? []) {
         formData.append("support_files", file, file.name);
         formData.append("support_document_types", documentType);
       }
@@ -610,11 +630,12 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
             basePdfPedimentoFile={basePdfPedimentoFile}
             documents={requiredDocuments}
             files={effectiveFiles}
-            onChange={updateFile}
+            onChange={updateFiles}
+            onRemove={removeFile}
             title="Documentos soporte requeridos"
           />
         ) : null}
-        {step === 3 ? <DocumentsStep basePdfPedimentoFile={null} documents={optionalDocuments} files={files} onChange={updateFile} title="Documentos opcionales / preferenciales" /> : null}
+        {step === 3 ? <DocumentsStep basePdfPedimentoFile={null} documents={optionalDocuments} files={files} onChange={updateFiles} onRemove={removeFile} title="Documentos opcionales / preferenciales" /> : null}
         {step === 4 ? (
           <ReviewStep
             auditReadinessDebug={auditReadinessDebug}
@@ -804,12 +825,14 @@ function DocumentsStep({
   documents,
   files,
   onChange,
+  onRemove,
   title,
 }: {
   basePdfPedimentoFile: File | null;
   documents: DocumentSlot[];
-  files: Partial<Record<SupportDocumentType, File>>;
-  onChange: (documentType: SupportDocumentType, file?: File) => void;
+  files: Partial<Record<SupportDocumentType, File[]>>;
+  onChange: (documentType: SupportDocumentType, files: File[]) => void;
+  onRemove: (documentType: SupportDocumentType, fileIndex: number) => void;
   title: string;
 }) {
   return (
@@ -823,9 +846,10 @@ function DocumentsStep({
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
         {documents.map((document) => {
           const isReusedPedimentoPdf = document.documentType === "pedimento" && Boolean(basePdfPedimentoFile);
+          const documentFiles = files[document.documentType] ?? [];
 
           return (
-            <label
+            <div
               className={`block rounded-2xl border border-dashed p-4 ${
                 isReusedPedimentoPdf ? "border-emerald-200 bg-emerald-50" : "border-slate-300 bg-slate-50"
               }`}
@@ -838,12 +862,38 @@ function DocumentsStep({
                 <input
                   accept={document.accept}
                   className="mt-4 block w-full text-sm text-slate-600 file:mr-4 file:rounded-xl file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-slate-800"
-                  onChange={(event) => onChange(document.documentType, event.target.files?.[0])}
+                  multiple
+                  onChange={(event) => {
+                    onChange(document.documentType, Array.from(event.target.files ?? []));
+                    event.target.value = "";
+                  }}
                   type="file"
                 />
               )}
-              <span className="mt-3 block text-xs text-slate-500">{files[document.documentType]?.name ?? "Pendiente de carga"}</span>
-            </label>
+              {documentFiles.length > 0 ? (
+                <div className="mt-3 space-y-2">
+                  <p className="text-xs font-semibold text-slate-600">{documentFiles.length} archivo{documentFiles.length === 1 ? "" : "s"} cargado{documentFiles.length === 1 ? "" : "s"}</p>
+                  <ul className="space-y-2">
+                    {documentFiles.map((file, index) => (
+                      <li className="flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2 text-xs text-slate-600" key={`${file.name}-${index}`}>
+                        <span className="break-all">{file.name}</span>
+                        {!isReusedPedimentoPdf ? (
+                          <button
+                            className="shrink-0 rounded-lg border border-slate-200 px-2 py-1 font-semibold text-slate-700 hover:bg-slate-50"
+                            onClick={() => onRemove(document.documentType, index)}
+                            type="button"
+                          >
+                            Eliminar
+                          </button>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <span className="mt-3 block text-xs text-slate-500">Pendiente de carga</span>
+              )}
+            </div>
           );
         })}
       </div>
@@ -908,7 +958,12 @@ function ReviewStep({
             {loadedDocuments.map((document) => (
               <div className="rounded-xl bg-white px-3 py-2 text-sm text-slate-600" key={document.documentType}>
                 <span className="font-medium text-slate-900">{document.label}</span>
-                <span className="mt-1 block text-xs">{document.file?.name}</span>
+                <span className="mt-1 block text-xs font-semibold">{document.files?.length ?? 0} archivo{document.files?.length === 1 ? "" : "s"}</span>
+                <ul className="mt-1 space-y-1">
+                  {(document.files ?? []).map((file, index) => (
+                    <li className="break-all text-xs" key={`${file.name}-${index}`}>{file.name}</li>
+                  ))}
+                </ul>
                 {document.reusedFromBase ? <span className="mt-1 block text-xs font-semibold text-emerald-700">Reutilizado desde Paso 1</span> : null}
               </div>
             ))}
@@ -1208,12 +1263,30 @@ function longTextKey(key: keyof PedimentoXmlData) {
   return key === "importer_name";
 }
 
-function documentSummary(documents: (DocumentSlot & { file?: File })[]) {
+function hasFiles(files?: File[]) {
+  return Array.isArray(files) && files.length > 0;
+}
+
+function documentSummary(documents: (DocumentSlot & { files?: File[] })[]) {
   return documents.map((document) => ({
     document_type: document.documentType,
-    file_name: document.file?.name ?? null,
+    file_name: document.files?.[0]?.name ?? null,
+    files: (document.files ?? []).map((file, index) => ({
+      file_index: index,
+      file_name: file.name,
+    })),
     label: document.label,
   }));
+}
+
+function supportFileMetadata(files: Partial<Record<SupportDocumentType, File[]>>) {
+  return Object.entries(files).flatMap(([documentType, documentFiles]) =>
+    (documentFiles ?? []).map((file, index) => ({
+      document_type: documentType,
+      file_index: index,
+      file_name: file.name,
+    })),
+  );
 }
 
 function reportFilename(expediente: string) {
