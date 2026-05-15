@@ -31,6 +31,7 @@ type CustomsAuditRow = {
   pedimento_number?: string | null;
   result_json?: unknown;
   risk_level?: string | null;
+  documents_added?: unknown;
   status?: string | null;
   superseded_by?: string | null;
 };
@@ -75,6 +76,7 @@ export default async function CustomsAuditDetailPage({ params }: CustomsAuditDet
   }
 
   const versionRows = await getVersionHistory(audit, auth?.accessToken);
+  const delta = buildVersionDelta(audit, versionRows);
   const loadedDocuments = arrayFrom(audit.loaded_documents);
   const missingDocuments = arrayFrom(audit.missing_documents);
   const findings = normalizeFindings(audit.findings);
@@ -138,6 +140,7 @@ export default async function CustomsAuditDetailPage({ params }: CustomsAuditDet
 
             <DocumentsCard title="Documentos cargados" documents={loadedDocuments} emptyText="No se registraron documentos cargados." />
             <DocumentsCard title="Brechas documentales" documents={missingDocuments} emptyText="No se registraron brechas documentales." />
+            <VersionDeltaCard delta={delta} />
             <VersionHistoryCard audits={versionRows} />
           </div>
 
@@ -301,6 +304,91 @@ function VersionHistoryCard({ audits }: { audits: CustomsAuditRow[] }) {
   );
 }
 
+type VersionDelta = {
+  addedDocuments: string[];
+  currentCompliance: number;
+  currentRisk: string;
+  currentVersion: number;
+  deltaPoints: number;
+  missingCurrent: number;
+  missingPrevious: number;
+  newFindings: FindingView[];
+  previousCompliance: number;
+  previousRisk: string;
+  previousVersion: number;
+  resolvedFindings: FindingView[];
+  totalVersions: number;
+};
+
+function VersionDeltaCard({ delta }: { delta: VersionDelta | null }) {
+  if (!delta) {
+    return (
+      <DetailCard title="Comparación de versiones">
+        <p className="text-sm text-slate-500">Sin versiones comparables todavía.</p>
+      </DetailCard>
+    );
+  }
+
+  const deltaLabel = `${delta.deltaPoints >= 0 ? "+" : ""}${delta.deltaPoints} pts`;
+
+  return (
+    <DetailCard title="Comparación de versiones">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <DeltaMetricCard
+          label="Cumplimiento"
+          value={`v${delta.previousVersion} ${Math.round(delta.previousCompliance)}% -> v${delta.currentVersion} ${Math.round(delta.currentCompliance)}%`}
+          hint={deltaLabel}
+          tone={delta.deltaPoints >= 0 ? "positive" : "negative"}
+        />
+        <DeltaMetricCard label="Riesgo" value={`${delta.previousRisk} -> ${delta.currentRisk}`} hint="nivel" tone="neutral" />
+        <DeltaMetricCard label="Brechas" value={`${delta.missingPrevious} -> ${delta.missingCurrent}`} hint={`${delta.missingPrevious - delta.missingCurrent >= 0 ? "-" : "+"}${Math.abs(delta.missingPrevious - delta.missingCurrent)}`} tone={delta.missingCurrent <= delta.missingPrevious ? "positive" : "negative"} />
+        <DeltaMetricCard label="Versiones" value={`v${delta.previousVersion} -> v${delta.currentVersion}`} hint={`${delta.totalVersions} total`} tone="neutral" />
+      </div>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-3">
+        <DeltaList title="Documentos agregados" emptyText="No se detectaron documentos agregados." items={delta.addedDocuments} />
+        <DeltaList title="Hallazgos resueltos" emptyText="No se detectaron hallazgos resueltos." items={delta.resolvedFindings.map((finding) => finding.title)} />
+        <DeltaList title="Hallazgos nuevos" emptyText="No se detectaron hallazgos nuevos." items={delta.newFindings.map((finding) => finding.title)} />
+      </div>
+    </DetailCard>
+  );
+}
+
+function DeltaMetricCard({ hint, label, tone, value }: { hint: string; label: string; tone: "negative" | "neutral" | "positive"; value: string }) {
+  const toneClass = {
+    negative: "bg-red-50 text-red-700",
+    neutral: "bg-slate-100 text-slate-700",
+    positive: "bg-emerald-50 text-emerald-700",
+  }[tone];
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+      <p className="text-xs font-semibold uppercase text-slate-500">{label}</p>
+      <p className="mt-3 text-base font-semibold text-slate-900">{value}</p>
+      <span className={`mt-3 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${toneClass}`}>{hint}</span>
+    </div>
+  );
+}
+
+function DeltaList({ emptyText, items, title }: { emptyText: string; items: string[]; title: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+      <p className="text-sm font-semibold text-slate-900">{title}</p>
+      {items.length === 0 ? (
+        <p className="mt-3 text-sm text-slate-500">{emptyText}</p>
+      ) : (
+        <ul className="mt-3 space-y-2">
+          {items.map((item, index) => (
+            <li className="break-words text-sm text-slate-600" key={`${item}-${index}`}>
+              {item}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function FindingsCard({ findings }: { findings: FindingView[] }) {
   return (
     <DetailCard title="Hallazgos preliminares">
@@ -325,6 +413,74 @@ function FindingsCard({ findings }: { findings: FindingView[] }) {
       )}
     </DetailCard>
   );
+}
+
+function buildVersionDelta(currentAudit: CustomsAuditRow, audits: CustomsAuditRow[]): VersionDelta | null {
+  const sorted = [...audits].sort((first, second) => number(first.audit_version) - number(second.audit_version));
+  const currentVersion = number(currentAudit.audit_version) || 1;
+  const currentIndex = sorted.findIndex((audit) => text(audit.id) === text(currentAudit.id) || number(audit.audit_version) === currentVersion);
+  const previousAudit = currentIndex > 0 ? sorted[currentIndex - 1] : null;
+
+  if (!previousAudit) {
+    return null;
+  }
+
+  const currentFindings = normalizeFindings(currentAudit.findings);
+  const previousFindings = normalizeFindings(previousAudit.findings);
+  const currentFindingKeys = new Set(currentFindings.map(findingKey));
+  const previousFindingKeys = new Set(previousFindings.map(findingKey));
+  const currentCompliance = number(currentAudit.compliance_percent);
+  const previousCompliance = number(previousAudit.compliance_percent);
+
+  return {
+    addedDocuments: addedDocuments(currentAudit, previousAudit),
+    currentCompliance,
+    currentRisk: text(currentAudit.risk_level, "unknown"),
+    currentVersion,
+    deltaPoints: Math.round(currentCompliance - previousCompliance),
+    missingCurrent: arrayFrom(currentAudit.missing_documents).length,
+    missingPrevious: arrayFrom(previousAudit.missing_documents).length,
+    newFindings: currentFindings.filter((finding) => !previousFindingKeys.has(findingKey(finding))),
+    previousCompliance,
+    previousRisk: text(previousAudit.risk_level, "unknown"),
+    previousVersion: number(previousAudit.audit_version) || 1,
+    resolvedFindings: previousFindings.filter((finding) => !currentFindingKeys.has(findingKey(finding))),
+    totalVersions: sorted.length,
+  };
+}
+
+function addedDocuments(currentAudit: CustomsAuditRow, previousAudit: CustomsAuditRow) {
+  const explicit = documentNamesFromList(currentAudit.documents_added);
+
+  if (explicit.length > 0) {
+    return explicit;
+  }
+
+  const previousNames = new Set(documentNamesFromList(previousAudit.loaded_documents).map((name) => name.toLowerCase()));
+  return documentNamesFromList(currentAudit.loaded_documents).filter((name) => !previousNames.has(name.toLowerCase()));
+}
+
+function documentNamesFromList(value: unknown) {
+  return arrayFrom(value).flatMap((item) => {
+    if (typeof item === "string") {
+      return text(item) ? [text(item)] : [];
+    }
+
+    const row = asRecord(item);
+    const files = arrayFrom(row.files);
+    const names = files.flatMap((file) => {
+      const fileRow = asRecord(file);
+      const fileName = text(fileRow.file_name, fileRow.name);
+      return fileName ? [fileName] : [];
+    });
+    const fallback = text(row.file_name, row.label, row.document_type);
+
+    return names.length > 0 ? names : fallback ? [fallback] : [];
+  });
+}
+
+function findingKey(finding: FindingView) {
+  return `${finding.severity}|${finding.title}|${finding.description}`.toLowerCase();
 }
 
 function normalizeFindings(value: unknown): FindingView[] {

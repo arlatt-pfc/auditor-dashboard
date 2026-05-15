@@ -137,45 +137,50 @@ export default async function CustomsCompliancePage({ searchParams }: CustomsCom
                 </tr>
               </thead>
               <tbody>
-                {audits.map((audit) => (
-                  <tr className="border-b border-slate-100 align-top last:border-b-0" key={text(audit.id, audit.operation_code)}>
-                    <td className="py-4 pr-4 text-slate-600">{formatDate(audit.created_at)}</td>
-                    <td className="py-4 pr-4">
-                      <div className="font-medium text-slate-900">{text(audit.operation_code, "Sin expediente")}</div>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">v{number(audit.audit_version) || 1}</span>
-                        {audit.is_latest ? <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">Última versión</span> : null}
-                      </div>
-                      <div className="mt-1 text-xs text-slate-500">{text(audit.id)}</div>
-                    </td>
-                    <td className="py-4 pr-4 text-slate-600">{text(audit.pedimento_number, "Pendiente")}</td>
-                    <td className="max-w-sm py-4 pr-4 text-slate-600">{text(audit.importer_name, "Sin importador")}</td>
-                    <td className="max-w-sm py-4 pr-4 text-slate-600">{text(audit.broker_name, "Sin agente")}</td>
-                    <td className="py-4 pr-4 font-medium text-slate-900">{formatPercent(audit.compliance_percent)}</td>
-                    <td className="py-4 pr-4">
-                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${riskClass(audit.risk_level)}`}>
-                        {text(audit.risk_level, "unknown")}
-                      </span>
-                    </td>
-                    <td className="py-4">
-                      <div className="flex flex-wrap gap-2">
-                        <Link
-                          className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
-                          href={`/dashboard/customs-compliance/${encodeURIComponent(text(audit.id, audit.operation_code))}`}
-                        >
-                          Ver
-                        </Link>
-                        <CustomsAuditPdfButton
-                          auditResult={auditResult(audit)}
-                          expediente={text(audit.operation_code, audit.id, "expediente")}
-                          loadedDocuments={arrayFrom(audit.loaded_documents)}
-                          missingDocuments={arrayFrom(audit.missing_documents)}
-                          pedimentoData={pedimentoData(audit)}
-                        />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {audits.map((audit) => {
+                  const improvement = complianceImprovement(audit, rows);
+
+                  return (
+                    <tr className="border-b border-slate-100 align-top last:border-b-0" key={text(audit.id, audit.operation_code)}>
+                      <td className="py-4 pr-4 text-slate-600">{formatDate(audit.created_at)}</td>
+                      <td className="py-4 pr-4">
+                        <div className="font-medium text-slate-900">{text(audit.operation_code, "Sin expediente")}</div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">v{number(audit.audit_version) || 1}</span>
+                          {audit.is_latest ? <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">Última versión</span> : null}
+                          {improvement > 0 ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">+{improvement} pts</span> : null}
+                        </div>
+                        <div className="mt-1 text-xs text-slate-500">{text(audit.id)}</div>
+                      </td>
+                      <td className="py-4 pr-4 text-slate-600">{text(audit.pedimento_number, "Pendiente")}</td>
+                      <td className="max-w-sm py-4 pr-4 text-slate-600">{text(audit.importer_name, "Sin importador")}</td>
+                      <td className="max-w-sm py-4 pr-4 text-slate-600">{text(audit.broker_name, "Sin agente")}</td>
+                      <td className="py-4 pr-4 font-medium text-slate-900">{formatPercent(audit.compliance_percent)}</td>
+                      <td className="py-4 pr-4">
+                        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${riskClass(audit.risk_level)}`}>
+                          {text(audit.risk_level, "unknown")}
+                        </span>
+                      </td>
+                      <td className="py-4">
+                        <div className="flex flex-wrap gap-2">
+                          <Link
+                            className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+                            href={`/dashboard/customs-compliance/${encodeURIComponent(text(audit.id, audit.operation_code))}`}
+                          >
+                            Ver
+                          </Link>
+                          <CustomsAuditPdfButton
+                            auditResult={auditResult(audit)}
+                            expediente={text(audit.operation_code, audit.id, "expediente")}
+                            loadedDocuments={arrayFrom(audit.loaded_documents)}
+                            missingDocuments={arrayFrom(audit.missing_documents)}
+                            pedimentoData={pedimentoData(audit)}
+                          />
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
                 {audits.length === 0 ? (
                   <tr>
                     <td className="py-8 text-center text-sm text-slate-500" colSpan={8}>
@@ -205,7 +210,7 @@ export default async function CustomsCompliancePage({ searchParams }: CustomsCom
                         href={`/dashboard/customs-compliance/${encodeURIComponent(text(audit.id, audit.operation_code))}`}
                         key={text(audit.id, audit.operation_code)}
                       >
-                        v{number(audit.audit_version) || 1}
+                        v{number(audit.audit_version) || 1}{complianceImprovement(audit, group.items) > 0 ? ` +${complianceImprovement(audit, group.items)} pts` : ""}
                       </Link>
                     ))}
                   </div>
@@ -296,6 +301,22 @@ function buildVersionGroups(audits: CustomsAuditRow[]) {
     key,
     operationCode: text(items[0]?.operation_code, "Sin expediente"),
   }));
+}
+
+function complianceImprovement(audit: CustomsAuditRow, audits: CustomsAuditRow[]) {
+  const groupKey = text(audit.audit_group_id, audit.operation_code, audit.id, "sin-grupo");
+  const currentVersion = number(audit.audit_version) || 1;
+  const group = audits
+    .filter((row) => text(row.audit_group_id, row.operation_code, row.id, "sin-grupo") === groupKey)
+    .sort((first, second) => number(first.audit_version) - number(second.audit_version));
+  const currentIndex = group.findIndex((row) => text(row.id) === text(audit.id) || number(row.audit_version) === currentVersion);
+  const previous = currentIndex > 0 ? group[currentIndex - 1] : null;
+
+  if (!previous) {
+    return 0;
+  }
+
+  return Math.round(number(audit.compliance_percent) - number(previous.compliance_percent));
 }
 
 function normalizeFilters(searchParams: Record<string, string | string[] | undefined>): Filters {
