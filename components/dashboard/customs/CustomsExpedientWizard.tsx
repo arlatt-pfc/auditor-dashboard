@@ -89,8 +89,10 @@ type DocumentSlot = {
 };
 
 type LoadedDocument = DocumentSlot & {
+  existingDocument?: ExistingDocument;
   files?: File[];
   reusedFromBase?: boolean;
+  reusedFromPrevious?: boolean;
 };
 
 type AuditResult = {
@@ -121,6 +123,22 @@ type AuditReadinessDebug = {
   missingReasons: string[];
   operationCode: string;
   pedimentoNumber: string;
+};
+
+type ExistingDocument = {
+  document_type?: string;
+  file_name?: string | null;
+  files?: { file_name?: string | null }[];
+  label?: string;
+};
+
+export type CustomsRerunContext = {
+  auditGroupId: string;
+  loadedDocuments: unknown[];
+  missingDocuments: unknown[];
+  nextAuditVersion: number;
+  parentAuditId: string;
+  pedimentoData: Record<string, unknown>;
 };
 
 const emptyXmlData: PedimentoXmlData = {
@@ -322,14 +340,14 @@ const criticalityMetaByType: Record<DocumentCriticality, { badgeClass: string; l
 
 const customsAuditEndpoint = "https://api.logisticadedatos.com.mx/audit/run";
 
-export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) {
+export function CustomsExpedientWizard({ canExecute, rerunContext }: { canExecute: boolean; rerunContext?: CustomsRerunContext }) {
   void canExecute;
 
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [baseFile, setBaseFile] = useState<File | null>(null);
   const [baseDocumentKind, setBaseDocumentKind] = useState<BaseDocumentKind>("");
-  const [xmlData, setXmlData] = useState<PedimentoXmlData>(emptyXmlData);
+  const [xmlData, setXmlData] = useState<PedimentoXmlData>(() => normalizePedimentoData(rerunContext?.pedimentoData));
   const [parseResult, setParseResult] = useState<ParseResponse | null>(null);
   const [parseError, setParseError] = useState<ParseError | null>(null);
   const [isParsing, setIsParsing] = useState(false);
@@ -346,6 +364,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
   const hasPedimentoNumber = normalizedPedimentoNumber.length > 0;
   const isCfdiInvalid = baseDocumentKind === "cfdi_invalid";
   const basePdfPedimentoFile = baseDocumentKind === "pdf_pedimento" ? baseFile : null;
+  const existingDocumentsByType = useMemo(() => existingDocumentMap(rerunContext?.loadedDocuments), [rerunContext?.loadedDocuments]);
   const effectiveFiles = useMemo(
     () => ({
       ...files,
@@ -355,12 +374,12 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
   );
   const canRunAudit = hasMinimumAuditData() && !isRunning;
   const missingAuditReasons = [
-    !baseFile ? "archivo base" : "",
+    !baseFile && !rerunContext ? "archivo base" : "",
     normalizedPedimentoNumber.length === 0 ? "pedimento" : "",
     normalizedOperationCode.length === 0 ? "código expediente" : "",
     isCfdiInvalid ? "documento válido" : "",
-    !hasFiles(effectiveFiles.commercial_invoice) ? "factura comercial" : "",
-    !hasFiles(effectiveFiles.broker_expense_account) ? "cuenta de gastos" : "",
+    !hasDocument("commercial_invoice") ? "factura comercial" : "",
+    !hasDocument("broker_expense_account") ? "cuenta de gastos" : "",
   ].filter(Boolean);
   const auditReadinessDebug: AuditReadinessDebug = {
     baseDocumentKind,
@@ -377,21 +396,24 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
 
   function hasMinimumAuditData() {
     return (
-      Boolean(baseFile) &&
+      (Boolean(baseFile) || Boolean(rerunContext)) &&
       Boolean((xmlData.pedimento_number || "").trim()) &&
       Boolean((xmlData.operation_code || "").trim()) &&
       baseDocumentKind !== "cfdi_invalid" &&
-      hasFiles(effectiveFiles.commercial_invoice) &&
-      hasFiles(effectiveFiles.broker_expense_account)
+      hasDocument("commercial_invoice") &&
+      hasDocument("broker_expense_account")
     );
+  }
+  function hasDocument(documentType: SupportDocumentType) {
+    return hasFiles(effectiveFiles[documentType]) || existingDocumentsByType.has(documentType);
   }
   const stepOneCanContinue = hasPedimentoNumber && baseDocumentKind !== "cfdi_invalid";
   const missingRequiredDocuments = useMemo(
     () =>
       requiredDocuments.filter(
-        (document) => minimumSupportDocumentTypes.has(document.documentType) && !hasFiles(effectiveFiles[document.documentType]),
+        (document) => minimumSupportDocumentTypes.has(document.documentType) && !hasFiles(effectiveFiles[document.documentType]) && !existingDocumentsByType.has(document.documentType),
       ),
-    [effectiveFiles],
+    [effectiveFiles, existingDocumentsByType],
   );
   const missingSupportDocuments = useMemo(
     () =>
@@ -400,19 +422,31 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
           (document) => document.documentType !== "pedimento" && !minimumSupportDocumentTypes.has(document.documentType),
         ),
         ...optionalDocuments,
-      ].filter((document) => !hasFiles(effectiveFiles[document.documentType])),
-    [effectiveFiles],
+      ].filter((document) => !hasFiles(effectiveFiles[document.documentType]) && !existingDocumentsByType.has(document.documentType)),
+    [effectiveFiles, existingDocumentsByType],
   );
   const loadedDocuments = useMemo(
     () =>
       [...requiredDocuments, ...optionalDocuments]
         .map((document) => ({
           ...document,
+          existingDocument: existingDocumentsByType.get(document.documentType),
           files: effectiveFiles[document.documentType],
           reusedFromBase: document.documentType === "pedimento" && Boolean(basePdfPedimentoFile) && !hasFiles(files.pedimento),
+          reusedFromPrevious: !hasFiles(effectiveFiles[document.documentType]) && existingDocumentsByType.has(document.documentType),
+        }))
+        .filter((document) => hasFiles(document.files) || document.reusedFromPrevious),
+    [basePdfPedimentoFile, effectiveFiles, existingDocumentsByType, files.pedimento],
+  );
+  const documentsAdded = useMemo(
+    () =>
+      [...requiredDocuments, ...optionalDocuments]
+        .map((document) => ({
+          ...document,
+          files: files[document.documentType],
         }))
         .filter((document) => hasFiles(document.files)),
-    [basePdfPedimentoFile, effectiveFiles, files.pedimento],
+    [files],
   );
 
   function selectBaseDocument(file?: File) {
@@ -567,7 +601,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
       return;
     }
 
-    const selectedBaseFile = baseFile;
+    const selectedBaseFile = baseFile ?? (rerunContext ? rerunBaseFile(xmlData) : null);
 
     if (!selectedBaseFile) {
       setError("Para ejecutar auditoría se requiere como mínimo pedimento, factura comercial y cuenta de gastos.");
@@ -652,16 +686,24 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
     setResult(payload);
     const persistedAuditId = await persistCustomsAudit(payload);
     setCustomsAuditId(persistedAuditId);
+    if (rerunContext && persistedAuditId) {
+      router.push(`/dashboard/customs-compliance/${encodeURIComponent(persistedAuditId)}`);
+      return;
+    }
     router.refresh();
   }
 
   async function persistCustomsAudit(auditResult: AuditResult) {
     const response = await fetch("/api/customs/audits", {
       body: JSON.stringify({
+        auditGroupId: rerunContext?.auditGroupId,
         auditResult,
+        documentsAdded: documentSummary(documentsAdded),
         loadedDocuments: documentSummary(loadedDocuments),
         missingDocuments: documentSummary([...missingRequiredDocuments, ...missingSupportDocuments]),
+        parentAuditId: rerunContext?.parentAuditId,
         pedimentoData: xmlData,
+        rerunReason: rerunContext ? "Reauditoría de expediente con documentos agregados o reemplazados." : "",
       }),
       headers: {
         "Content-Type": "application/json",
@@ -749,19 +791,33 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
             onManualCapture={useManualCapture}
             parseError={parseError}
             parseResult={parseResult}
+            rerunContext={rerunContext}
           />
         ) : null}
         {step === 2 ? (
           <DocumentsStep
             basePdfPedimentoFile={basePdfPedimentoFile}
             documents={requiredDocuments}
+            existingDocumentsByType={existingDocumentsByType}
             files={effectiveFiles}
             onChange={updateFiles}
             onRemove={removeFile}
+            rerunContext={rerunContext}
             title="Documentos soporte requeridos"
           />
         ) : null}
-        {step === 3 ? <DocumentsStep basePdfPedimentoFile={null} documents={optionalDocuments} files={files} onChange={updateFiles} onRemove={removeFile} title="Documentos opcionales / preferenciales" /> : null}
+        {step === 3 ? (
+          <DocumentsStep
+            basePdfPedimentoFile={null}
+            documents={optionalDocuments}
+            existingDocumentsByType={existingDocumentsByType}
+            files={files}
+            onChange={updateFiles}
+            onRemove={removeFile}
+            rerunContext={rerunContext}
+            title="Documentos opcionales / preferenciales"
+          />
+        ) : null}
         {step === 4 ? (
           <ReviewStep
             auditReadinessDebug={auditReadinessDebug}
@@ -779,6 +835,7 @@ export function CustomsExpedientWizard({ canExecute }: { canExecute: boolean }) 
             result={result}
             baseDocumentKind={baseDocumentKind}
             baseFileName={baseFile?.name}
+            rerunContext={rerunContext}
           />
         ) : null}
       </div>
@@ -818,6 +875,7 @@ function XmlStep({
   onManualCapture,
   parseError,
   parseResult,
+  rerunContext,
 }: {
   baseDocumentKind: BaseDocumentKind;
   data: PedimentoXmlData;
@@ -829,12 +887,21 @@ function XmlStep({
   onManualCapture: () => void;
   parseError: ParseError | null;
   parseResult: ParseResponse | null;
+  rerunContext?: CustomsRerunContext;
 }) {
   const missingCount = parseResult?.missing_fields.length ?? 0;
 
   return (
     <div>
       <h3 className="text-xl font-semibold text-slate-900">Cargar pedimento base</h3>
+      {rerunContext ? (
+        <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+          <p className="text-sm font-semibold text-emerald-900">Reauditoría del expediente</p>
+          <p className="mt-2 text-sm leading-6 text-emerald-800">
+            Se precargaron los datos del pedimento y la evidencia registrada. Puedes cargar un nuevo pedimento si quieres reemplazar el documento base.
+          </p>
+        </div>
+      ) : null}
       <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
         Carga el XML del pedimento cuando esté disponible. Si solo cuentas con el PDF, el sistema intentará extraer los datos principales para iniciar el expediente.
       </p>
@@ -949,16 +1016,20 @@ function ParseErrorCard({ error, onManualCapture }: { error: ParseError; onManua
 function DocumentsStep({
   basePdfPedimentoFile,
   documents,
+  existingDocumentsByType,
   files,
   onChange,
   onRemove,
+  rerunContext,
   title,
 }: {
   basePdfPedimentoFile: File | null;
   documents: DocumentSlot[];
+  existingDocumentsByType: Map<SupportDocumentType, ExistingDocument>;
   files: Partial<Record<SupportDocumentType, File[]>>;
   onChange: (documentType: SupportDocumentType, files: File[]) => void;
   onRemove: (documentType: SupportDocumentType, fileIndex: number) => void;
+  rerunContext?: CustomsRerunContext;
   title: string;
 }) {
   return (
@@ -969,10 +1040,17 @@ function DocumentsStep({
           El PDF del pedimento cargado en el Paso 1 se utilizará como documento base y soporte documental.
         </p>
       ) : null}
+      {rerunContext ? (
+        <p className="mt-2 text-sm leading-6 text-slate-500">
+          Los documentos ya cargados se conservan desde la versión anterior. Puedes agregar faltantes o cargar nuevos archivos para reemplazar evidencia existente.
+        </p>
+      ) : null}
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
         {documents.map((document) => {
           const isReusedPedimentoPdf = document.documentType === "pedimento" && Boolean(basePdfPedimentoFile);
           const documentFiles = files[document.documentType] ?? [];
+          const existingDocument = existingDocumentsByType.get(document.documentType);
+          const previousFileNames = existingDocumentFileNames(existingDocument);
           const evidenceMeta = evidenceTypeMeta[document.evidenceType];
           const criticalityMeta = criticalityMetaByType[document.criticality];
 
@@ -1007,16 +1085,31 @@ function DocumentsStep({
               {isReusedPedimentoPdf ? (
                 <span className="mt-3 block text-sm font-medium text-emerald-800">Usando el PDF cargado en Paso 1</span>
               ) : (
-                <input
-                  accept={document.accept}
-                  className="mt-4 block w-full text-sm text-slate-600 file:mr-4 file:rounded-xl file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-slate-800"
-                  multiple
-                  onChange={(event) => {
-                    onChange(document.documentType, Array.from(event.target.files ?? []));
-                    event.target.value = "";
-                  }}
-                  type="file"
-                />
+                <>
+                  {existingDocument ? (
+                    <div className="mt-3 rounded-xl border border-white bg-white/80 px-3 py-2">
+                      <p className="text-xs font-semibold text-slate-700">Cargado en versión anterior</p>
+                      <ul className="mt-1 space-y-1">
+                        {previousFileNames.map((fileName, index) => (
+                          <li className="break-all text-xs text-slate-500" key={`${fileName}-${index}`}>
+                            {fileName}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  <input
+                    accept={document.accept}
+                    className="mt-4 block w-full text-sm text-slate-600 file:mr-4 file:rounded-xl file:border-0 file:bg-slate-900 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-slate-800"
+                    multiple
+                    onChange={(event) => {
+                      onChange(document.documentType, Array.from(event.target.files ?? []));
+                      event.target.value = "";
+                    }}
+                    type="file"
+                  />
+                  {existingDocument ? <p className="mt-2 text-xs font-medium text-slate-500">Los archivos nuevos reemplazarán esta evidencia para la nueva versión.</p> : null}
+                </>
               )}
               {documentFiles.length > 0 ? (
                 <div className="mt-3 space-y-2">
@@ -1113,6 +1206,7 @@ function ReviewStep({
   result,
   baseDocumentKind,
   baseFileName,
+  rerunContext,
 }: {
   auditReadinessDebug: AuditReadinessDebug;
   canRunAudit: boolean;
@@ -1129,15 +1223,24 @@ function ReviewStep({
   result: AuditResult | null;
   baseDocumentKind: BaseDocumentKind;
   baseFileName?: string;
+  rerunContext?: CustomsRerunContext;
 }) {
   return (
     <div>
       <h3 className="text-xl font-semibold text-slate-900">Revisión y ejecutar auditoría</h3>
+      {rerunContext ? (
+        <section className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+          <p className="text-sm font-semibold text-emerald-900">Esta auditoría generará la versión v{rerunContext.nextAuditVersion} del expediente.</p>
+          <p className="mt-2 text-sm leading-6 text-emerald-800">
+            Se conservará el grupo de auditoría y se comparará la nueva ejecución contra la versión anterior.
+          </p>
+        </section>
+      ) : null}
       <div className="mt-5 grid gap-4 lg:grid-cols-[1fr_0.9fr]">
         <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
           <p className="text-sm font-semibold text-slate-900">Resumen del pedimento base</p>
           <div className="mt-3 grid gap-2 text-sm text-slate-600">
-            <ReviewRow label="Documento base" value={baseFileName ?? "Pendiente"} />
+            <ReviewRow label="Documento base" value={baseFileName ?? (rerunContext ? "Pedimento precargado de versión anterior" : "Pendiente")} />
             <ReviewRow label="Tipo detectado" value={baseDocumentLabels[baseDocumentKind]} />
             <ReviewRow label="Expediente" value={data.operation_code || "Pendiente"} />
             <ReviewRow label="Pedimento" value={data.pedimento_full || data.pedimento_number || "Pendiente"} />
@@ -1156,12 +1259,18 @@ function ReviewStep({
                 <span className="font-medium text-slate-900">{document.label}</span>
                 <span className="mt-1 block text-xs font-semibold">{document.files?.length ?? 0} archivo{document.files?.length === 1 ? "" : "s"}</span>
                 <ul className="mt-1 space-y-1">
-                  {(document.files ?? []).map((file, index) => (
-                    <li className="break-all text-xs" key={`${file.name}-${index}`}>{file.name}</li>
-                  ))}
-                </ul>
-                {document.reusedFromBase ? <span className="mt-1 block text-xs font-semibold text-emerald-700">Reutilizado desde Paso 1</span> : null}
-              </div>
+                {(document.files ?? []).map((file, index) => (
+                  <li className="break-all text-xs" key={`${file.name}-${index}`}>{file.name}</li>
+                ))}
+                {document.reusedFromPrevious ? existingDocumentFileNames(document.existingDocument).map((fileName, index) => (
+                  <li className="break-all text-xs" key={`${fileName}-${index}`}>
+                    {fileName}
+                  </li>
+                )) : null}
+              </ul>
+              {document.reusedFromBase ? <span className="mt-1 block text-xs font-semibold text-emerald-700">Reutilizado desde Paso 1</span> : null}
+              {document.reusedFromPrevious ? <span className="mt-1 block text-xs font-semibold text-emerald-700">Conservado desde versión anterior</span> : null}
+            </div>
             ))}
           </div>
         </section>
@@ -1463,19 +1572,25 @@ function hasFiles(files?: File[]) {
   return Array.isArray(files) && files.length > 0;
 }
 
-function documentSummary(documents: (DocumentSlot & { files?: File[] })[]) {
+function documentSummary(documents: (DocumentSlot & { existingDocument?: ExistingDocument; files?: File[]; reusedFromPrevious?: boolean })[]) {
   return documents.map((document) => ({
     criticality: document.criticality,
     description: document.description,
     document_type: document.documentType,
     evidence_type: document.evidenceType,
     examples: document.examples,
-    file_name: document.files?.[0]?.name ?? null,
-    files: (document.files ?? []).map((file, index) => ({
-      file_index: index,
-      file_name: file.name,
-    })),
+    file_name: document.files?.[0]?.name ?? document.existingDocument?.file_name ?? null,
+    files: hasFiles(document.files)
+      ? (document.files ?? []).map((file, index) => ({
+          file_index: index,
+          file_name: file.name,
+        }))
+      : (document.existingDocument?.files ?? []).map((file, index) => ({
+          file_index: index,
+          file_name: file.file_name ?? `Archivo ${index + 1}`,
+        })),
     label: document.label,
+    source: document.reusedFromPrevious ? "previous_version" : "current_upload",
   }));
 }
 
@@ -1516,6 +1631,127 @@ function stringValue(value: PedimentoXmlData[keyof PedimentoXmlData]) {
 
 function simpleStringValue(value: number | string | null) {
   return value === null ? "" : String(value);
+}
+
+function normalizePedimentoData(value?: Record<string, unknown>): PedimentoXmlData {
+  if (!value) {
+    return emptyXmlData;
+  }
+
+  return {
+    ...emptyXmlData,
+    broker_name: simpleString(value.broker_name),
+    broker_person_name: simpleString(value.broker_person_name),
+    broker_patent: simpleString(value.broker_patent),
+    commercial_value_usd: nullableNumber(value.commercial_value_usd),
+    paid_commercial_value_mxn: nullableNumber(value.paid_commercial_value_mxn),
+    customs_office: simpleString(value.customs_office),
+    customs_value_mxn: nullableNumber(value.customs_value_mxn),
+    dta_mxn: nullableNumber(value.dta_mxn),
+    exchange_rate: simpleString(value.exchange_rate) || nullableNumber(value.exchange_rate),
+    igi_mxn: nullableNumber(value.igi_mxn),
+    import_date: simpleString(value.import_date),
+    importer_name: simpleString(value.importer_name),
+    importer_rfc: simpleString(value.importer_rfc),
+    iva_mxn: nullableNumber(value.iva_mxn),
+    operation_code: simpleString(value.operation_code),
+    payment_date: simpleString(value.payment_date),
+    pedimento_full: simpleString(value.pedimento_full),
+    pedimento_number: simpleString(value.pedimento_number),
+    prv_mxn: nullableNumber(value.prv_mxn),
+    coves: stringArray(value.coves),
+    invoice_details: Array.isArray(value.invoice_details) ? (value.invoice_details as InvoiceDetail[]) : [],
+    invoices: stringArray(value.invoices),
+    providers: stringArray(value.providers),
+    reference: simpleString(value.reference),
+    tariff_items: stringArray(value.tariff_items),
+    total_contributions_mxn: nullableNumber(value.total_contributions_mxn),
+  };
+}
+
+function existingDocumentMap(documents?: unknown[]) {
+  const map = new Map<SupportDocumentType, ExistingDocument>();
+
+  for (const document of documents ?? []) {
+    const row = document && typeof document === "object" && !Array.isArray(document) ? (document as ExistingDocument) : null;
+    const documentType = row?.document_type;
+
+    if (row && isSupportDocumentType(documentType)) {
+      map.set(documentType, row);
+    }
+  }
+
+  return map;
+}
+
+function existingDocumentFileNames(document?: ExistingDocument) {
+  const fileNames = document?.files?.map((file) => file.file_name).filter((fileName): fileName is string => Boolean(fileName?.trim())) ?? [];
+  const fallback = document?.file_name?.trim();
+
+  if (fileNames.length > 0) {
+    return fileNames;
+  }
+
+  return fallback ? [fallback] : ["Sin archivo registrado"];
+}
+
+function isSupportDocumentType(value: unknown): value is SupportDocumentType {
+  return typeof value === "string" && [...requiredDocuments, ...optionalDocuments].some((document) => document.documentType === value);
+}
+
+function rerunBaseFile(data: PedimentoXmlData) {
+  const expediente = data.operation_code || data.pedimento_number || "expediente";
+  const body = `Reauditoria LDA Compliance\nExpediente: ${expediente}\nPedimento: ${data.pedimento_number}\n`;
+  const pdf = `%PDF-1.1
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length ${body.length + 54} >>
+stream
+BT /F1 12 Tf 72 720 Td (${body.replace(/[()]/g, "")}) Tj ET
+endstream
+endobj
+trailer
+<< /Root 1 0 R >>
+%%EOF`;
+
+  return new File([pdf], `pedimento-base-${expediente}.pdf`, { type: "application/pdf" });
+}
+
+function simpleString(value: unknown) {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  return "";
+}
+
+function nullableNumber(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
+function stringArray(value: unknown) {
+  return Array.isArray(value) ? value.map((item) => simpleString(item)).filter(Boolean) : [];
 }
 
 function operationCodeFromPedimento(pedimentoNumber: string, importDate: string) {

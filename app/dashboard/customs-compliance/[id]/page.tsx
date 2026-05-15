@@ -100,6 +100,12 @@ export default async function CustomsAuditDetailPage({ params }: CustomsAuditDet
             >
               Volver al histórico
             </Link>
+            <Link
+              className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+              href={`/dashboard/customs-compliance/new?parent_audit_id=${encodeURIComponent(text(audit.id))}`}
+            >
+              Reauditar expediente
+            </Link>
             <CustomsAuditPdfButton
               auditResult={auditResult(audit)}
               expediente={text(audit.operation_code, audit.id, "expediente")}
