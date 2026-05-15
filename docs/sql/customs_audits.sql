@@ -36,6 +36,18 @@ create table if not exists public.customs_audits (
   status text default 'completed'
 );
 
+create table if not exists public.customs_audit_logs (
+  id uuid primary key default gen_random_uuid(),
+  audit_id uuid null references public.customs_audits(id),
+  operation_code text,
+  stage text,
+  status text,
+  message text,
+  duration_ms integer null,
+  metadata_json jsonb default '{}'::jsonb,
+  created_at timestamptz default now()
+);
+
 alter table public.customs_audits
   add column if not exists audit_group_id uuid,
   add column if not exists audit_version int default 1,
@@ -55,8 +67,12 @@ create index if not exists idx_customs_audits_created_at_desc on public.customs_
 create index if not exists idx_customs_audits_audit_group_id on public.customs_audits(audit_group_id);
 create index if not exists idx_customs_audits_latest on public.customs_audits(audit_group_id, is_latest);
 create index if not exists idx_customs_audits_deleted_at on public.customs_audits(deleted_at);
+create index if not exists idx_customs_audit_logs_audit_id on public.customs_audit_logs(audit_id);
+create index if not exists idx_customs_audit_logs_operation_code on public.customs_audit_logs(operation_code);
+create index if not exists idx_customs_audit_logs_created_at_desc on public.customs_audit_logs(created_at desc);
 
 alter table public.customs_audits enable row level security;
+alter table public.customs_audit_logs enable row level security;
 
 drop policy if exists customs_audits_select_company_engine on public.customs_audits;
 create policy customs_audits_select_company_engine
@@ -91,4 +107,34 @@ using (
 with check (
   company_id = public.current_user_company_id()
   and public.user_can_execute_engine('CUSTOMS_COMPLIANCE')
+);
+
+drop policy if exists customs_audit_logs_select_company_engine on public.customs_audit_logs;
+create policy customs_audit_logs_select_company_engine
+on public.customs_audit_logs
+for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.customs_audits audit
+    where audit.id = customs_audit_logs.audit_id
+      and audit.company_id = public.current_user_company_id()
+      and public.user_can_access_engine('CUSTOMS_COMPLIANCE')
+  )
+);
+
+drop policy if exists customs_audit_logs_insert_company_engine on public.customs_audit_logs;
+create policy customs_audit_logs_insert_company_engine
+on public.customs_audit_logs
+for insert
+to authenticated
+with check (
+  exists (
+    select 1
+    from public.customs_audits audit
+    where audit.id = customs_audit_logs.audit_id
+      and audit.company_id = public.current_user_company_id()
+      and public.user_can_execute_engine('CUSTOMS_COMPLIANCE')
+  )
 );

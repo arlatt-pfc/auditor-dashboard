@@ -1,7 +1,9 @@
 from pathlib import Path
 from uuid import uuid4
+from contextlib import contextmanager
 import json
 import shutil
+import time
 import traceback
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile, status
@@ -70,81 +72,97 @@ async def run_audit(
     x_lda_audit_client: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
 ) -> AuditRunResponse | JSONResponse:
+    execution_log: list[dict[str, object]] = []
+
     try:
-        _authorize_audit_run(settings, authorization, x_lda_audit_client)
+        with _audit_stage(execution_log, "received", "Recibiendo expediente y metadata del navegador."):
+            _authorize_audit_run(settings, authorization, x_lda_audit_client)
 
-        metadata = {
-            "loaded_documents": _parse_json_metadata(loaded_documents),
-            "missing_required_documents": _parse_json_metadata(missing_required_documents),
-            "missing_support_documents": _parse_json_metadata(missing_support_documents),
-            "pedimento_data": _parse_json_metadata(pedimento_data),
-            "support_file_metadata": _parse_json_metadata(support_file_metadata),
-            "support_document_types": support_document_types or [],
-        }
-        missing_documents_count = _metadata_count(metadata["missing_required_documents"]) + _metadata_count(metadata["missing_support_documents"])
+            metadata = {
+                "loaded_documents": _parse_json_metadata(loaded_documents),
+                "missing_required_documents": _parse_json_metadata(missing_required_documents),
+                "missing_support_documents": _parse_json_metadata(missing_support_documents),
+                "pedimento_data": _parse_json_metadata(pedimento_data),
+                "support_file_metadata": _parse_json_metadata(support_file_metadata),
+                "support_document_types": support_document_types or [],
+            }
+            missing_documents_count = _metadata_count(metadata["missing_required_documents"]) + _metadata_count(metadata["missing_support_documents"])
 
-        print(
-            "[audit.run] received",
-            {
-                "main_file_name": file.filename if file else None,
-                "metadata_keys": [key for key, value in metadata.items() if value],
-                "missing_documents_count": missing_documents_count,
-                "support_files_count": len(support_files or []),
-            },
-        )
-
-        if file is None:
-            return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content={"error": "MAIN_FILE_MISSING"})
-
-        payload = await file.read()
-        print(
-            "[audit.run] file",
-            {
-                "main_file_name": file.filename,
-                "main_file_size": len(payload),
-                "support_files_count": len(support_files or []),
-            },
-        )
-
-        if not payload:
-            return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content={"error": "MAIN_FILE_MISSING", "detail": "Main file is empty."})
-
-        if not _is_pdf(file):
-            return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content={"error": "INVALID_FILE_TYPE", "detail": "Only PDF audit files are supported."})
-
-        operation_code = _operation_code(operation_id, metadata["pedimento_data"])
-        work_dir = settings.tmp_dir / operation_code
-        support_dir = work_dir / "support"
-        work_dir.mkdir(parents=True, exist_ok=True)
-        support_dir.mkdir(parents=True, exist_ok=True)
-        pdf_path = work_dir / _safe_pdf_name(file.filename or f"{operation_code}.pdf")
-
-        with pdf_path.open("wb") as target:
-            target.write(payload)
-
-        support_metadata_items = metadata["support_file_metadata"] if isinstance(metadata["support_file_metadata"], list) else []
-        saved_support_files = []
-        saved_support_file_records = []
-        for index, support_file in enumerate(support_files or [], start=1):
-            support_payload = await support_file.read()
-            support_path = support_dir / _safe_upload_name(support_file.filename or f"support-{index}")
-            with support_path.open("wb") as target:
-                target.write(support_payload)
-            saved_support_files.append(str(support_path))
-            document_type = _support_document_type(index - 1, support_metadata_items, support_document_types or [])
-            saved_support_file_records.append(
+            print(
+                "[audit.run] received",
                 {
-                    "document_type": document_type,
-                    "file_name": support_file.filename or f"support-{index}",
-                    "path": str(support_path),
-                    "size": len(support_payload),
-                }
+                    "main_file_name": file.filename if file else None,
+                    "metadata_keys": [key for key, value in metadata.items() if value],
+                    "missing_documents_count": missing_documents_count,
+                    "support_files_count": len(support_files or []),
+                },
             )
 
-        invoice_details, invoice_parse_errors = _parse_commercial_invoice_support_files(saved_support_file_records, support_dir)
-        metadata["invoice_details"] = invoice_details
-        metadata["commercial_invoice_parse_errors"] = invoice_parse_errors
-        metadata["customs_rule_findings"] = evaluate_customs_rules(metadata)
+        if file is None:
+            return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content={"error": "MAIN_FILE_MISSING", "execution_log": execution_log})
+
+        with _audit_stage(execution_log, "save_files", "Guardando pedimento base y documentos soporte en área temporal."):
+            payload = await file.read()
+            print(
+                "[audit.run] file",
+                {
+                    "main_file_name": file.filename,
+                    "main_file_size": len(payload),
+                    "support_files_count": len(support_files or []),
+                },
+            )
+
+            if not payload:
+                return JSONResponse(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    content={"error": "MAIN_FILE_MISSING", "detail": "Main file is empty.", "execution_log": execution_log},
+                )
+
+            if not _is_pdf(file):
+                return JSONResponse(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    content={"error": "INVALID_FILE_TYPE", "detail": "Only PDF audit files are supported.", "execution_log": execution_log},
+                )
+
+            operation_code = _operation_code(operation_id, metadata["pedimento_data"])
+            work_dir = settings.tmp_dir / operation_code
+            support_dir = work_dir / "support"
+            work_dir.mkdir(parents=True, exist_ok=True)
+            support_dir.mkdir(parents=True, exist_ok=True)
+            pdf_path = work_dir / _safe_pdf_name(file.filename or f"{operation_code}.pdf")
+
+            with pdf_path.open("wb") as target:
+                target.write(payload)
+
+            support_metadata_items = metadata["support_file_metadata"] if isinstance(metadata["support_file_metadata"], list) else []
+            saved_support_files = []
+            saved_support_file_records = []
+            for index, support_file in enumerate(support_files or [], start=1):
+                support_payload = await support_file.read()
+                support_path = support_dir / _safe_upload_name(support_file.filename or f"support-{index}")
+                with support_path.open("wb") as target:
+                    target.write(support_payload)
+                saved_support_files.append(str(support_path))
+                document_type = _support_document_type(index - 1, support_metadata_items, support_document_types or [])
+                saved_support_file_records.append(
+                    {
+                        "document_type": document_type,
+                        "file_name": support_file.filename or f"support-{index}",
+                        "path": str(support_path),
+                        "size": len(support_payload),
+                    }
+                )
+
+        with _audit_stage(execution_log, "ocr", "Preparando extracción de texto y OCR cuando el PDF lo requiera."):
+            invoice_file_count = sum(1 for record in saved_support_file_records if record.get("document_type") == "commercial_invoice")
+
+        with _audit_stage(execution_log, "parse_invoices", "Extrayendo facturas comerciales y registros multipágina."):
+            invoice_details, invoice_parse_errors = _parse_commercial_invoice_support_files(saved_support_file_records, support_dir)
+            metadata["invoice_details"] = invoice_details
+            metadata["commercial_invoice_parse_errors"] = invoice_parse_errors
+
+        with _audit_stage(execution_log, "rules_engine", "Aplicando catálogo configurable de reglas aduaneras."):
+            metadata["customs_rule_findings"] = evaluate_customs_rules(metadata)
 
         print(
             "[audit.run] saved files",
@@ -153,13 +171,21 @@ async def run_audit(
                 "main_file_path": str(pdf_path),
                 "support_files": saved_support_files,
                 "invoice_details_count": len(invoice_details),
+                "invoice_file_count": invoice_file_count,
             },
         )
 
         if x_lda_audit_client == "customs-dashboard":
-            print("[audit.run] pipeline start", {"stage": "customs_mvp_controlled_result"})
-            result = _customs_mvp_result(metadata, saved_support_files)
-            print("[audit.run] pipeline complete", {"stage": "customs_mvp_controlled_result"})
+            with _audit_stage(execution_log, "scoring", "Calculando cumplimiento, riesgo y dictamen ejecutivo."):
+                print("[audit.run] pipeline start", {"stage": "customs_mvp_controlled_result"})
+                result = _customs_mvp_result(metadata, saved_support_files)
+                print("[audit.run] pipeline complete", {"stage": "customs_mvp_controlled_result"})
+
+            with _audit_stage(execution_log, "result_ready", "Resultado listo para envío al dashboard."):
+                pass
+
+            result["execution_log"] = execution_log
+
             return JSONResponse(status_code=status.HTTP_200_OK, content=result)
 
         print("[audit.run] pipeline start", {"function": "run_pipeline"})
@@ -178,13 +204,13 @@ async def run_audit(
         print("[audit.run] error", traceback.format_exc())
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"error": "AUDIT_EXECUTION_FAILED", "detail": str(exc), "stage": "pipeline_execution"},
+            content={"error": "AUDIT_EXECUTION_FAILED", "detail": str(exc), "execution_log": execution_log, "stage": "pipeline_execution"},
         )
     except Exception as exc:
         print("[audit.run] error", traceback.format_exc())
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"error": "AUDIT_EXECUTION_FAILED", "detail": str(exc), "stage": "pipeline_execution"},
+            content={"error": "AUDIT_EXECUTION_FAILED", "detail": str(exc), "execution_log": execution_log, "stage": "pipeline_execution"},
         )
 
 
@@ -278,6 +304,31 @@ def _metadata_count(value: object) -> int:
         return len(value)
 
     return 0
+
+
+@contextmanager
+def _audit_stage(execution_log: list[dict[str, object]], stage: str, message: str, metadata: dict[str, object] | None = None):
+    start = time.perf_counter()
+    status_value = "completed"
+    detail = message
+
+    try:
+        yield
+    except Exception as exc:
+        status_value = "failed"
+        detail = str(exc)
+        raise
+    finally:
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        execution_log.append(
+            {
+                "duration_ms": duration_ms,
+                "message": detail,
+                "metadata_json": metadata or {},
+                "stage": stage,
+                "status": status_value,
+            }
+        )
 
 
 def _support_document_type(index: int, metadata_items: object, support_document_types: list[str]) -> str:
@@ -379,9 +430,12 @@ def _customs_mvp_result(metadata: dict[str, object], saved_support_files: list[s
             )
         )
 
+    compliance_percent = max(0, 100 - (missing_count * 8) - _finding_penalty(findings))
+    risk_level = _risk_level(findings, missing_count)
+
     return {
-        "compliance_percent": max(0, 100 - (missing_count * 8)),
-        "executive_dictamen": "Resultado preliminar generado para Customs Compliance. El paquete documental fue recibido en el VPS y será evaluado con brechas documentales cuando aplique.",
+        "compliance_percent": compliance_percent,
+        "executive_dictamen": _executive_dictamen(compliance_percent, risk_level, findings, missing_count),
         "findings": findings,
         "invoice_details": invoice_details if isinstance(invoice_details, list) else [],
         "loaded_documents": loaded_documents,
@@ -392,7 +446,7 @@ def _customs_mvp_result(metadata: dict[str, object], saved_support_files: list[s
         "missing_required_documents": missing_required,
         "missing_support_documents": missing_support,
         "report_pdf_url": None,
-        "risk_level": "Medium" if missing_count else "Low",
+        "risk_level": risk_level,
         "top_critical_gaps": [str(finding.get("description") or finding.get("title") or "") for finding in findings],
     }
 
@@ -422,6 +476,51 @@ def _finding(rule_code: str, title: str, description: str, recommendation: str, 
         "severity": severity,
         "title": title,
     }
+
+
+def _finding_penalty(findings: list[dict[str, object]]) -> int:
+    penalties = {
+        "critical": 14,
+        "high": 10,
+        "medium": 5,
+        "low": 2,
+    }
+
+    return sum(penalties.get(str(finding.get("severity") or "").lower(), 4) for finding in findings if finding.get("rule_code") != "CUSTOMS_RULES_NO_GAPS")
+
+
+def _risk_level(findings: list[dict[str, object]], missing_count: int) -> str:
+    severities = {str(finding.get("severity") or "").lower() for finding in findings}
+
+    if "critical" in severities:
+        return "Critical"
+
+    if "high" in severities or missing_count >= 4:
+        return "High"
+
+    if "medium" in severities or missing_count > 0:
+        return "Medium"
+
+    return "Low"
+
+
+def _executive_dictamen(compliance_percent: int, risk_level: str, findings: list[dict[str, object]], missing_count: int) -> str:
+    actionable_findings = [finding for finding in findings if finding.get("rule_code") != "CUSTOMS_RULES_NO_GAPS"]
+
+    if not actionable_findings:
+        return (
+            "El expediente aduanal fue procesado en el VPS sin brechas preliminares detectadas por el motor automático. "
+            "Se recomienda conservar la evidencia documental y realizar validación especializada antes de cierre definitivo."
+        )
+
+    priority_titles = [str(finding.get("title") or finding.get("rule_code") or "Hallazgo") for finding in actionable_findings[:3]]
+    missing_message = f" Se registraron {missing_count} documentos faltantes como brechas documentales." if missing_count else ""
+
+    return (
+        f"El expediente presenta cumplimiento estimado de {compliance_percent}% y riesgo {risk_level}. "
+        f"Los principales puntos de atención son: {', '.join(priority_titles)}.{missing_message} "
+        "El dictamen es preliminar y requiere remediar los hallazgos antes de considerar el expediente cerrado."
+    )
 
 
 def _customs_error(code: str, status_code: int, message: str) -> JSONResponse:

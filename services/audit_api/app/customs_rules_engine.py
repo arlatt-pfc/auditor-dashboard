@@ -448,9 +448,14 @@ def _template(rule: dict[str, Any], **values: Any) -> str:
     template = str(rule.get("recommendation_template") or "Revisar evidencia documental.")
 
     try:
-        return template.format(**values)
+        rendered = template.format(**values)
     except KeyError:
-        return template
+        rendered = template
+
+    if re.search(r"\{[^{}]+\}", rendered):
+        return "No fue posible calcular la diferencia por información insuficiente."
+
+    return rendered
 
 
 def _has_loaded_document(context: dict[str, Any], document_type: str) -> bool:

@@ -10,6 +10,8 @@ type PersistAuditPayload = {
   audit_result?: Record<string, unknown>;
   documentsAdded?: unknown;
   documents_added?: unknown;
+  executionLog?: unknown;
+  execution_log?: unknown;
   loadedDocuments?: unknown;
   loaded_documents?: unknown;
   missingDocuments?: unknown;
@@ -28,6 +30,10 @@ type CustomsAuditRow = {
   audit_group_id?: string;
   audit_version?: number | string;
   deleted_at?: string | null;
+  id?: string;
+};
+
+type CustomsAuditLogRow = {
   id?: string;
 };
 
@@ -126,7 +132,34 @@ export async function POST(request: Request) {
     );
   }
 
+  await persistExecutionLog(row.id, operationCode, requestPayload.executionLog ?? requestPayload.execution_log ?? auditResult.execution_log, auth.accessToken);
+
   return NextResponse.json({ audit_group_id: auditGroupId, audit_version: auditVersion, id: row.id });
+}
+
+async function persistExecutionLog(auditId: string, operationCode: string, executionLog: unknown, accessToken: string) {
+  const rows = jsonArray(executionLog);
+
+  for (const item of rows) {
+    const row = record(item);
+
+    await supabaseInsert<CustomsAuditLogRow>(
+      "customs_audit_logs",
+      {
+        audit_id: auditId,
+        duration_ms: numberOrNull(row.duration_ms),
+        message: text(row.message),
+        metadata_json: record(row.metadata_json),
+        operation_code: operationCode,
+        stage: text(row.stage),
+        status: text(row.status),
+      },
+      {
+        accessToken,
+        select: "id",
+      },
+    );
+  }
 }
 
 async function getParentAudit(parentAuditId: unknown, auditGroupId: unknown, accessToken: string) {
@@ -207,4 +240,8 @@ function number(value: unknown, fallback: number) {
 
 function jsonArray(value: unknown) {
   return Array.isArray(value) ? value : [];
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }

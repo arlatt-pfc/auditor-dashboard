@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
@@ -98,6 +98,7 @@ type LoadedDocument = DocumentSlot & {
 type AuditResult = {
   compliance_percent: number;
   executive_dictamen: string;
+  execution_log?: AuditExecutionLog[];
   findings?: (AuditFinding | string)[];
   persisted: boolean;
   report_pdf_url: string | null;
@@ -110,6 +111,14 @@ type AuditFinding = {
   recommendation?: string;
   severity?: "Critical" | "High" | "Medium" | "Low" | string;
   title?: string;
+};
+
+type AuditExecutionLog = {
+  duration_ms?: number | null;
+  message?: string;
+  metadata_json?: Record<string, unknown>;
+  stage?: string;
+  status?: string;
 };
 
 type AuditReadinessDebug = {
@@ -339,6 +348,7 @@ const criticalityMetaByType: Record<DocumentCriticality, { badgeClass: string; l
 };
 
 const customsAuditEndpoint = "https://api.logisticadedatos.com.mx/audit/run";
+const auditProgressSteps = ["Recibiendo expediente", "Procesando OCR", "Extrayendo facturas", "Aplicando reglas", "Generando resultado"];
 
 export function CustomsExpedientWizard({ canExecute, rerunContext }: { canExecute: boolean; rerunContext?: CustomsRerunContext }) {
   void canExecute;
@@ -356,7 +366,20 @@ export function CustomsExpedientWizard({ canExecute, rerunContext }: { canExecut
   const [isRunning, setIsRunning] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [customsAuditId, setCustomsAuditId] = useState("");
+  const [auditProgressIndex, setAuditProgressIndex] = useState(0);
   const [result, setResult] = useState<AuditResult | null>(null);
+
+  useEffect(() => {
+    if (!isRunning) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setAuditProgressIndex((current) => Math.min(current + 1, auditProgressSteps.length - 1));
+    }, 1400);
+
+    return () => window.clearInterval(interval);
+  }, [isRunning]);
 
   const data = xmlData;
   const normalizedPedimentoNumber = (xmlData.pedimento_number || data.pedimento_number || "").trim();
@@ -609,6 +632,7 @@ export function CustomsExpedientWizard({ canExecute, rerunContext }: { canExecut
     }
 
     setIsRunning(true);
+    setAuditProgressIndex(0);
     setError("");
     setCustomsAuditId("");
 
@@ -699,6 +723,7 @@ export function CustomsExpedientWizard({ canExecute, rerunContext }: { canExecut
         auditGroupId: rerunContext?.auditGroupId,
         auditResult,
         documentsAdded: documentSummary(documentsAdded),
+        executionLog: auditResult.execution_log ?? [],
         loadedDocuments: documentSummary(loadedDocuments),
         missingDocuments: documentSummary([...missingRequiredDocuments, ...missingSupportDocuments]),
         parentAuditId: rerunContext?.parentAuditId,
@@ -820,6 +845,7 @@ export function CustomsExpedientWizard({ canExecute, rerunContext }: { canExecut
         ) : null}
         {step === 4 ? (
           <ReviewStep
+            auditProgressIndex={auditProgressIndex}
             auditReadinessDebug={auditReadinessDebug}
             data={xmlData}
             error={error}
@@ -1191,6 +1217,7 @@ function CriticalityIcon({ type }: { type: DocumentCriticality }) {
 }
 
 function ReviewStep({
+  auditProgressIndex,
   auditReadinessDebug,
   canRunAudit,
   customsAuditId,
@@ -1208,6 +1235,7 @@ function ReviewStep({
   baseFileName,
   rerunContext,
 }: {
+  auditProgressIndex: number;
   auditReadinessDebug: AuditReadinessDebug;
   canRunAudit: boolean;
   customsAuditId: string;
@@ -1304,6 +1332,7 @@ function ReviewStep({
         </section>
       ) : null}
       {error ? <p className="mt-4 text-sm font-semibold text-red-700">{error}</p> : null}
+      {isRunning ? <AuditProgressCard activeIndex={auditProgressIndex} /> : null}
       {result ? (
         <>
           <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
@@ -1368,6 +1397,44 @@ function AuditDebugPanel({ debug }: { debug: AuditReadinessDebug }) {
         <DebugRow label="isRunning" value={String(debug.isRunning)} />
         <DebugRow label="canRunAudit" value={String(debug.canRunAudit)} />
       </div>
+    </section>
+  );
+}
+
+function AuditProgressCard({ activeIndex }: { activeIndex: number }) {
+  return (
+    <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-semibold text-slate-900">Ejecución en progreso</p>
+        <span className="text-xs font-medium text-slate-500">{Math.min(activeIndex + 1, auditProgressSteps.length)} / {auditProgressSteps.length}</span>
+      </div>
+      <div className="mt-4 h-2 rounded-full bg-slate-100">
+        <div
+          className="h-2 rounded-full bg-slate-900 transition-all"
+          style={{ width: `${((activeIndex + 1) / auditProgressSteps.length) * 100}%` }}
+        />
+      </div>
+      <ol className="mt-4 grid gap-2 md:grid-cols-5">
+        {auditProgressSteps.map((step, index) => {
+          const isDone = index < activeIndex;
+          const isActive = index === activeIndex;
+
+          return (
+            <li
+              className={`rounded-xl border px-3 py-2 text-xs font-semibold ${
+                isActive
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : isDone
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : "border-slate-200 bg-slate-50 text-slate-500"
+              }`}
+              key={step}
+            >
+              {step}
+            </li>
+          );
+        })}
+      </ol>
     </section>
   );
 }

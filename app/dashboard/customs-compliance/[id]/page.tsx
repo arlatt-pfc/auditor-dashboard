@@ -40,6 +40,16 @@ type CustomsAuditRow = {
   superseded_by?: string | null;
 };
 
+type CustomsAuditLogRow = {
+  created_at?: string | null;
+  duration_ms?: number | string | null;
+  id?: string | null;
+  message?: string | null;
+  metadata_json?: unknown;
+  stage?: string | null;
+  status?: string | null;
+};
+
 type FindingView = {
   description: string;
   recommendation: string;
@@ -80,12 +90,14 @@ export default async function CustomsAuditDetailPage({ params }: CustomsAuditDet
   }
 
   const versionRows = await getVersionHistory(audit, auth?.accessToken);
+  const executionLogs = await getExecutionLogs(audit, auth?.accessToken);
   const delta = buildVersionDelta(audit, versionRows);
   const loadedDocuments = arrayFrom(audit.loaded_documents);
   const missingDocuments = arrayFrom(audit.missing_documents);
   const findings = normalizeFindings(audit.findings);
   const technicalJson = {
     audit,
+    execution_logs: executionLogs,
     pedimento_data: audit.pedimento_data,
     result_json: audit.result_json,
   };
@@ -167,6 +179,7 @@ export default async function CustomsAuditDetailPage({ params }: CustomsAuditDet
 
           <div className="space-y-6">
             <FindingsCard findings={findings} />
+            <ExecutionLogCard logs={executionLogs} />
             <DetailCard title="JSON técnico">
               <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                 <summary className="cursor-pointer text-sm font-semibold text-slate-800">Ver payload técnico</summary>
@@ -204,6 +217,25 @@ async function getVersionHistory(audit: CustomsAuditRow, accessToken?: string) {
   });
 
   return rows.length > 0 ? rows : [audit];
+}
+
+async function getExecutionLogs(audit: CustomsAuditRow, accessToken?: string) {
+  const auditId = text(audit.id);
+
+  if (!auditId) {
+    return [];
+  }
+
+  return supabaseSelect<CustomsAuditLogRow>("customs_audit_logs", {
+    accessToken,
+    eq: {
+      audit_id: auditId,
+    },
+    order: {
+      ascending: true,
+      column: "created_at",
+    },
+  });
 }
 
 function AuditNotFound() {
@@ -435,6 +467,36 @@ function FindingsCard({ findings }: { findings: FindingView[] }) {
           ))}
         </ul>
       )}
+    </DetailCard>
+  );
+}
+
+function ExecutionLogCard({ logs }: { logs: CustomsAuditLogRow[] }) {
+  return (
+    <DetailCard title="Bitácora técnica de ejecución">
+      <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-800">Ver etapas técnicas</summary>
+        {logs.length === 0 ? (
+          <p className="mt-4 text-sm text-slate-500">No hay bitácora técnica guardada para esta auditoría.</p>
+        ) : (
+          <div className="mt-4 space-y-3">
+            {logs.map((log, index) => (
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm" key={text(log.id, log.stage, index)}>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <span className="font-semibold text-slate-900">{text(log.stage, `Etapa ${index + 1}`)}</span>
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${log.status === "failed" ? "bg-red-100 text-red-800" : "bg-emerald-100 text-emerald-800"}`}>
+                    {text(log.status, "completed")}
+                  </span>
+                </div>
+                <p className="mt-2 leading-6 text-slate-600">{text(log.message, "Sin mensaje.")}</p>
+                <p className="mt-2 text-xs text-slate-500">
+                  Duración: {number(log.duration_ms)} ms · {formatMexicoDateTime(log.created_at)}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </details>
     </DetailCard>
   );
 }
