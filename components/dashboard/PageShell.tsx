@@ -14,16 +14,16 @@ type PageShellProps = {
 export async function PageShell({ children, currentPath }: PageShellProps) {
   const auth = await getAuthContext();
 
-  if (currentPath?.startsWith("/dashboard") && !auth) {
+  if (!auth) {
     redirect("/login");
   }
 
-  const filteredMenuSections = filterMenuSections(menuSections, auth?.engines.map((engine) => engine.code) ?? []);
+  const filteredMenuSections = filterMenuSections(menuSections, auth.engines.map((engine) => engine.code));
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <div className="flex min-h-screen">
-        <Sidebar currentPath={currentPath} menuSections={filteredMenuSections} userContext={auth?.profile ?? null} userEmail={auth?.user.email} />
+        <Sidebar currentPath={currentPath} menuSections={filteredMenuSections} userContext={auth.profile} userEmail={auth.user.email} />
         <main className="flex-1">{children}</main>
       </div>
     </div>
