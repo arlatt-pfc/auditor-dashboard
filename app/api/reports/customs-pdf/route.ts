@@ -3,6 +3,8 @@ import path from "node:path";
 
 import { PDFDocument, StandardFonts, rgb, type PDFImage, type PDFFont, type PDFPage } from "pdf-lib";
 
+import { formatMexicoDateTime } from "@/lib/date-format";
+
 type PdfRequest = {
   auditResult?: AuditResult;
   loadedDocuments?: DocumentSummary[];
@@ -74,11 +76,7 @@ export async function POST(request: Request) {
   const pedimento = payload.pedimentoData;
   const audit = payload.auditResult;
   const expediente = clean(pedimento.operation_code) || clean(pedimento.pedimento_number) || "sin-expediente";
-  const issuedAt = new Intl.DateTimeFormat("es-MX", {
-    dateStyle: "long",
-    timeStyle: "short",
-    timeZone: "America/Mexico_City",
-  }).format(new Date());
+  const issuedAt = formatMexicoDateTime(new Date());
 
   drawCover(context, {
     expediente,

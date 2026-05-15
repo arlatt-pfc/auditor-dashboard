@@ -5,6 +5,7 @@ import { CustomsAuditPdfButton } from "@/components/dashboard/customs/CustomsAud
 import { Header } from "@/components/dashboard/Header";
 import { PageShell } from "@/components/dashboard/PageShell";
 import { getAuthContext, userCanReadEngine } from "@/lib/auth/session";
+import { formatMexicoDateTime } from "@/lib/date-format";
 import { supabaseSelect } from "@/lib/supabase/client";
 
 type CustomsAuditDetailPageProps = {
@@ -127,7 +128,7 @@ export default async function CustomsAuditDetailPage({ params }: CustomsAuditDet
           <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
             <p className="text-sm font-semibold text-amber-900">Auditoría archivada</p>
             <p className="mt-2 text-sm leading-6 text-amber-800">
-              Esta auditoría fue archivada el {formatDate(audit.deleted_at)} y no puede reauditarse.
+              Esta auditoría fue archivada el {formatMexicoDateTime(audit.deleted_at)} y no puede reauditarse.
             </p>
             {text(audit.delete_reason) ? <p className="mt-2 text-sm text-amber-800">Motivo: {text(audit.delete_reason)}</p> : null}
           </section>
@@ -149,7 +150,7 @@ export default async function CustomsAuditDetailPage({ params }: CustomsAuditDet
                   ["Importador", text(audit.importer_name, "Sin importador")],
                   ["Agente aduanal", text(audit.broker_name, "Sin agente")],
                   ["Aduana", text(audit.customs_office, "Pendiente")],
-                  ["Fecha de ejecución", formatDate(audit.created_at)],
+                  ["Fecha de ejecución", formatMexicoDateTime(audit.created_at)],
                   ["Cumplimiento", formatPercent(audit.compliance_percent)],
                   ["Nivel de riesgo", text(audit.risk_level, "unknown")],
                   ["Versión", `v${number(audit.audit_version) || 1}${audit.is_latest ? " · Última versión" : ""}`],
@@ -319,7 +320,7 @@ function VersionHistoryCard({ audits }: { audits: CustomsAuditRow[] }) {
               <span className="font-semibold text-slate-900">v{number(audit.audit_version) || 1}</span>
               {audit.is_latest ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">Última versión</span> : null}
             </span>
-            <span className="mt-2 block text-slate-600">{formatDate(audit.created_at)} · {formatPercent(audit.compliance_percent)} · {text(audit.risk_level, "unknown")}</span>
+            <span className="mt-2 block text-slate-600">{formatMexicoDateTime(audit.created_at)} · {formatPercent(audit.compliance_percent)} · {text(audit.risk_level, "unknown")}</span>
           </Link>
         ))}
       </div>
@@ -549,19 +550,6 @@ function pedimentoData(audit: CustomsAuditRow) {
     pedimento_number: audit.pedimento_number,
     ...asRecord(audit.pedimento_data),
   };
-}
-
-function formatDate(value: unknown) {
-  const date = new Date(text(value));
-
-  if (Number.isNaN(date.getTime())) {
-    return "Sin fecha";
-  }
-
-  return new Intl.DateTimeFormat("es-MX", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
 }
 
 function formatPercent(value: unknown) {

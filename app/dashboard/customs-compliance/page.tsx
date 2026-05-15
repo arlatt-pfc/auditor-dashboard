@@ -6,6 +6,7 @@ import { CustomsAuditPdfButton } from "@/components/dashboard/customs/CustomsAud
 import { Header } from "@/components/dashboard/Header";
 import { PageShell } from "@/components/dashboard/PageShell";
 import { getAuthContext, userCanCreateEngine, userCanExecuteEngine, userCanReadEngine } from "@/lib/auth/session";
+import { formatMexicoDateTime } from "@/lib/date-format";
 import { supabaseSelect } from "@/lib/supabase/client";
 
 type CustomsCompliancePageProps = {
@@ -147,7 +148,7 @@ export default async function CustomsCompliancePage({ searchParams }: CustomsCom
 
                   return (
                     <tr className="border-b border-slate-100 align-top last:border-b-0" key={text(audit.id, audit.operation_code)}>
-                      <td className="py-4 pr-4 text-slate-600">{formatDate(audit.created_at)}</td>
+                      <td className="py-4 pr-4 text-slate-600">{formatMexicoDateTime(audit.created_at)}</td>
                       <td className="py-4 pr-4">
                         <div className="font-medium text-slate-900">{text(audit.operation_code, "Sin expediente")}</div>
                         <div className="mt-2 flex flex-wrap gap-2">
@@ -373,19 +374,6 @@ function contains(value: unknown, query: string) {
   }
 
   return text(value).toLowerCase().includes(query.toLowerCase());
-}
-
-function formatDate(value: unknown) {
-  const date = new Date(text(value));
-
-  if (Number.isNaN(date.getTime())) {
-    return "Sin fecha";
-  }
-
-  return new Intl.DateTimeFormat("es-MX", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
 }
 
 function formatPercent(value: unknown) {
