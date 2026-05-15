@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
 import type { CustomsDocumentType } from "@/lib/customs/types";
@@ -74,9 +75,16 @@ type ParseError = {
 
 type SupportDocumentType = CustomsDocumentType | "forwarding_invoice";
 
+type EvidenceType = "primary" | "complementary";
+type DocumentCriticality = "mandatory" | "recommended";
+
 type DocumentSlot = {
   accept: string;
+  criticality: DocumentCriticality;
+  description: string;
   documentType: SupportDocumentType;
+  evidenceType: EvidenceType;
+  examples: string[];
   label: string;
 };
 
@@ -145,20 +153,108 @@ const emptyXmlData: PedimentoXmlData = {
 };
 
 const requiredDocuments: DocumentSlot[] = [
-  { documentType: "pedimento", label: "Pedimento PDF", accept: "application/pdf,.pdf" },
-  { documentType: "commercial_invoice", label: "Facturas comerciales", accept: "application/pdf,.pdf" },
-  { documentType: "bill_of_lading", label: "Bill of Lading / documento transporte", accept: "application/pdf,.pdf" },
-  { documentType: "broker_expense_account", label: "Cuenta de gastos", accept: "application/pdf,.pdf" },
-  { documentType: "cfdi_pdf", label: "CFDI PDF del agente", accept: "application/pdf,.pdf" },
-  { documentType: "cfdi_xml", label: "CFDI XML del agente", accept: "application/xml,text/xml,.xml" },
-  { documentType: "data_sheet", label: "Hoja de datos", accept: "application/pdf,.pdf" },
+  {
+    accept: "application/pdf,.pdf",
+    criticality: "recommended",
+    description: "Copia oficial del pedimento para cotejar contra el documento base.",
+    documentType: "pedimento",
+    evidenceType: "primary",
+    examples: ["Pedimento pagado", "Pedimento simplificado"],
+    label: "Pedimento PDF",
+  },
+  {
+    accept: "application/pdf,.pdf",
+    criticality: "mandatory",
+    description: "Evidencia comercial del proveedor para validar valor, moneda e incoterm.",
+    documentType: "commercial_invoice",
+    evidenceType: "primary",
+    examples: ["Commercial invoice", "Factura de proveedor"],
+    label: "Facturas comerciales",
+  },
+  {
+    accept: "application/pdf,.pdf",
+    criticality: "recommended",
+    description: "Documento de transporte usado para confirmar embarque, origen y consignatario.",
+    documentType: "bill_of_lading",
+    evidenceType: "primary",
+    examples: ["Bill of Lading", "Air Waybill", "Carta porte internacional"],
+    label: "Bill of Lading / documento transporte",
+  },
+  {
+    accept: "application/pdf,.pdf",
+    criticality: "mandatory",
+    description: "Documento del agente aduanal con gastos, contribuciones y conceptos cobrados.",
+    documentType: "broker_expense_account",
+    evidenceType: "primary",
+    examples: ["Cuenta de gastos", "Estado de cuenta del agente"],
+    label: "Cuenta de gastos",
+  },
+  {
+    accept: "application/pdf,.pdf",
+    criticality: "recommended",
+    description: "Representacion impresa del CFDI emitido por el agente aduanal.",
+    documentType: "cfdi_pdf",
+    evidenceType: "primary",
+    examples: ["CFDI honorarios PDF", "CFDI gastos PDF"],
+    label: "CFDI PDF del agente",
+  },
+  {
+    accept: "application/xml,text/xml,.xml",
+    criticality: "recommended",
+    description: "Archivo fiscal estructurado para validar datos timbrados del agente.",
+    documentType: "cfdi_xml",
+    evidenceType: "primary",
+    examples: ["CFDI honorarios XML", "CFDI gastos XML"],
+    label: "CFDI XML del agente",
+  },
+  {
+    accept: "application/pdf,.pdf",
+    criticality: "recommended",
+    description: "Soporte tecnico o descriptivo para identificar mercancias y atributos.",
+    documentType: "data_sheet",
+    evidenceType: "complementary",
+    examples: ["Ficha tecnica", "Catalogo", "Especificaciones"],
+    label: "Hoja de datos",
+  },
 ];
 
 const optionalDocuments: DocumentSlot[] = [
-  { documentType: "certificate_of_origin", label: "Certificado de origen T-MEC", accept: "application/pdf,.pdf" },
-  { documentType: "cove", label: "COVE", accept: "application/pdf,.pdf" },
-  { documentType: "annex", label: "Anexos", accept: "application/pdf,.pdf" },
-  { documentType: "forwarding_invoice", label: "Factura forwarding", accept: "application/pdf,.pdf" },
+  {
+    accept: "application/pdf,.pdf",
+    criticality: "recommended",
+    description: "Evidencia de origen para trato preferencial cuando aplique.",
+    documentType: "certificate_of_origin",
+    evidenceType: "primary",
+    examples: ["Certificacion T-MEC", "Certificado de origen"],
+    label: "Certificado de origen T-MEC",
+  },
+  {
+    accept: "application/pdf,.pdf",
+    criticality: "recommended",
+    description: "Acuse o comprobante COVE asociado a las facturas comerciales.",
+    documentType: "cove",
+    evidenceType: "primary",
+    examples: ["Acuse COVE", "Detalle COVE"],
+    label: "COVE",
+  },
+  {
+    accept: "application/pdf,.pdf",
+    criticality: "recommended",
+    description: "Documentos adicionales para soportar clasificacion, valor u operacion.",
+    documentType: "annex",
+    evidenceType: "complementary",
+    examples: ["Fotografias", "Cartas aclaratorias", "Correos soporte"],
+    label: "Anexos",
+  },
+  {
+    accept: "application/pdf,.pdf",
+    criticality: "recommended",
+    description: "Factura del forwarder para validar cargos logisticos relacionados.",
+    documentType: "forwarding_invoice",
+    evidenceType: "complementary",
+    examples: ["Invoice forwarder", "Cargos de flete", "Handling"],
+    label: "Factura forwarding",
+  },
 ];
 
 const minimumSupportDocumentTypes = new Set<SupportDocumentType>(["commercial_invoice", "broker_expense_account"]);
@@ -192,6 +288,36 @@ const baseDocumentLabels: Record<BaseDocumentKind, string> = {
   cfdi_invalid: "CFDI no válido para paso 1",
   pdf_pedimento: "PDF Pedimento",
   xml_pedimento: "XML Pedimento",
+};
+
+const evidenceTypeMeta: Record<EvidenceType, { badgeClass: string; cardClass: string; iconClass: string; label: string; tooltip: string }> = {
+  complementary: {
+    badgeClass: "bg-violet-50 text-violet-700 ring-violet-200",
+    cardClass: "border-violet-200 bg-violet-50/40",
+    iconClass: "bg-violet-100 text-violet-700",
+    label: "Complementaria",
+    tooltip: "Documentación de apoyo para robustecer el expediente.",
+  },
+  primary: {
+    badgeClass: "bg-blue-50 text-blue-700 ring-blue-200",
+    cardClass: "border-blue-200 bg-blue-50/40",
+    iconClass: "bg-blue-100 text-blue-700",
+    label: "Primaria",
+    tooltip: "Evidencia oficial emitida por terceros.",
+  },
+};
+
+const criticalityMetaByType: Record<DocumentCriticality, { badgeClass: string; label: string; tooltip: string }> = {
+  mandatory: {
+    badgeClass: "bg-red-50 text-red-700 ring-red-200",
+    label: "Obligatorio",
+    tooltip: "Bloquea la auditoría cuando forma parte de la evidencia mínima.",
+  },
+  recommended: {
+    badgeClass: "bg-amber-50 text-amber-700 ring-amber-200",
+    label: "Recomendado",
+    tooltip: "No bloquea la auditoría; si falta, se reporta como brecha documental.",
+  },
 };
 
 const customsAuditEndpoint = "https://api.logisticadedatos.com.mx/audit/run";
@@ -847,15 +973,37 @@ function DocumentsStep({
         {documents.map((document) => {
           const isReusedPedimentoPdf = document.documentType === "pedimento" && Boolean(basePdfPedimentoFile);
           const documentFiles = files[document.documentType] ?? [];
+          const evidenceMeta = evidenceTypeMeta[document.evidenceType];
+          const criticalityMeta = criticalityMetaByType[document.criticality];
 
           return (
             <div
-              className={`block rounded-2xl border border-dashed p-4 ${
-                isReusedPedimentoPdf ? "border-emerald-200 bg-emerald-50" : "border-slate-300 bg-slate-50"
+              className={`block rounded-2xl border border-dashed p-4 transition ${
+                isReusedPedimentoPdf ? "border-emerald-200 bg-emerald-50" : evidenceMeta.cardClass
               }`}
               key={document.documentType}
             >
-              <span className={`text-sm font-semibold ${isReusedPedimentoPdf ? "text-emerald-900" : "text-slate-800"}`}>{document.label}</span>
+              <div className="flex items-start gap-3">
+                <span className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${evidenceMeta.iconClass}`}>
+                  <EvidenceIcon type={document.evidenceType} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`text-sm font-semibold ${isReusedPedimentoPdf ? "text-emerald-900" : "text-slate-900"}`}>{document.label}</span>
+                    <DocumentBadge className={evidenceMeta.badgeClass} title={evidenceMeta.tooltip}>
+                      {evidenceMeta.label}
+                    </DocumentBadge>
+                    <DocumentBadge className={criticalityMeta.badgeClass} title={criticalityMeta.tooltip}>
+                      <CriticalityIcon type={document.criticality} />
+                      {criticalityMeta.label}
+                    </DocumentBadge>
+                  </div>
+                  <p className="mt-2 text-xs leading-5 text-slate-600">{document.description}</p>
+                  <p className="mt-2 text-xs text-slate-500">
+                    <span className="font-semibold text-slate-600">Ejemplos:</span> {document.examples.join(", ")}
+                  </p>
+                </div>
+              </div>
               {isReusedPedimentoPdf ? (
                 <span className="mt-3 block text-sm font-medium text-emerald-800">Usando el PDF cargado en Paso 1</span>
               ) : (
@@ -898,6 +1046,54 @@ function DocumentsStep({
         })}
       </div>
     </div>
+  );
+}
+
+function DocumentBadge({ children, className, title }: { children: ReactNode; className: string; title: string }) {
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${className}`} title={title}>
+      {children}
+    </span>
+  );
+}
+
+function EvidenceIcon({ type }: { type: EvidenceType }) {
+  if (type === "primary") {
+    return (
+      <svg aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24">
+        <path d="M12 3 5.5 5.5v5.8c0 4.4 2.7 7.3 6.5 9.7 3.8-2.4 6.5-5.3 6.5-9.7V5.5L12 3Z" />
+        <path d="m9.2 12.1 1.8 1.8 3.9-4.1" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg aria-hidden="true" className="h-5 w-5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24">
+      <path d="M7 5.5h10a2 2 0 0 1 2 2v9.5H7a2 2 0 0 1-2-2V7.5a2 2 0 0 1 2-2Z" />
+      <path d="M8 8.5h8" />
+      <path d="M8 12h6" />
+      <path d="M5 17h14" />
+    </svg>
+  );
+}
+
+function CriticalityIcon({ type }: { type: DocumentCriticality }) {
+  if (type === "mandatory") {
+    return (
+      <svg aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+        <path d="M12 4 3 20h18L12 4Z" />
+        <path d="M12 9v5" />
+        <path d="M12 17h.01" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+      <path d="M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z" />
+      <path d="M12 8v4" />
+      <path d="M12 15h.01" />
+    </svg>
   );
 }
 
@@ -1269,7 +1465,11 @@ function hasFiles(files?: File[]) {
 
 function documentSummary(documents: (DocumentSlot & { files?: File[] })[]) {
   return documents.map((document) => ({
+    criticality: document.criticality,
+    description: document.description,
     document_type: document.documentType,
+    evidence_type: document.evidenceType,
+    examples: document.examples,
     file_name: document.files?.[0]?.name ?? null,
     files: (document.files ?? []).map((file, index) => ({
       file_index: index,

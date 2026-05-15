@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
 from .config import Settings, get_settings
+from .commercial_invoice_parser import parse_commercial_invoice_pdf
 from .customs_parser import parse_uploaded_pedimento
 from .pipeline_runner import PipelineExecutionError, run_pipeline
 from .schemas import AuditRunResponse, PedimentoParseResponse
@@ -63,6 +64,7 @@ async def run_audit(
     missing_required_documents: str = Form(""),
     missing_support_documents: str = Form(""),
     support_file_metadata: str = Form(""),
+    support_document_types: list[str] | None = Form(default=None),
     authorization: str | None = Header(default=None),
     x_lda_audit_client: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
@@ -76,6 +78,7 @@ async def run_audit(
             "missing_support_documents": _parse_json_metadata(missing_support_documents),
             "pedimento_data": _parse_json_metadata(pedimento_data),
             "support_file_metadata": _parse_json_metadata(support_file_metadata),
+            "support_document_types": support_document_types or [],
         }
         missing_documents_count = _metadata_count(metadata["missing_required_documents"]) + _metadata_count(metadata["missing_support_documents"])
 
@@ -118,19 +121,35 @@ async def run_audit(
         with pdf_path.open("wb") as target:
             target.write(payload)
 
+        support_metadata_items = metadata["support_file_metadata"] if isinstance(metadata["support_file_metadata"], list) else []
         saved_support_files = []
+        saved_support_file_records = []
         for index, support_file in enumerate(support_files or [], start=1):
             support_payload = await support_file.read()
             support_path = support_dir / _safe_upload_name(support_file.filename or f"support-{index}")
             with support_path.open("wb") as target:
                 target.write(support_payload)
             saved_support_files.append(str(support_path))
+            document_type = _support_document_type(index - 1, support_metadata_items, support_document_types or [])
+            saved_support_file_records.append(
+                {
+                    "document_type": document_type,
+                    "file_name": support_file.filename or f"support-{index}",
+                    "path": str(support_path),
+                    "size": len(support_payload),
+                }
+            )
+
+        invoice_details, invoice_parse_errors = _parse_commercial_invoice_support_files(saved_support_file_records, support_dir)
+        metadata["invoice_details"] = invoice_details
+        metadata["commercial_invoice_parse_errors"] = invoice_parse_errors
 
         print(
             "[audit.run] saved files",
             {
                 "main_file_path": str(pdf_path),
                 "support_files": saved_support_files,
+                "invoice_details_count": len(invoice_details),
             },
         )
 
@@ -258,6 +277,45 @@ def _metadata_count(value: object) -> int:
     return 0
 
 
+def _support_document_type(index: int, metadata_items: object, support_document_types: list[str]) -> str:
+    if isinstance(metadata_items, list) and index < len(metadata_items):
+        item = metadata_items[index]
+        if isinstance(item, dict):
+            document_type = item.get("document_type")
+            if isinstance(document_type, str) and document_type:
+                return document_type
+
+    if index < len(support_document_types):
+        return support_document_types[index]
+
+    return ""
+
+
+def _parse_commercial_invoice_support_files(
+    saved_support_file_records: list[dict[str, object]],
+    support_dir: Path,
+) -> tuple[list[dict[str, object | None]], list[str]]:
+    invoice_details: list[dict[str, object | None]] = []
+    errors: list[str] = []
+
+    for record in saved_support_file_records:
+        if record.get("document_type") != "commercial_invoice":
+            continue
+
+        path = Path(str(record.get("path") or ""))
+        file_name = str(record.get("file_name") or path.name)
+
+        if path.suffix.lower() != ".pdf":
+            errors.append(f"Factura comercial {file_name} no es PDF; requiere revisión manual.")
+            continue
+
+        result = parse_commercial_invoice_pdf(path, file_name, support_dir)
+        invoice_details.extend(result.invoice_details)
+        errors.extend(result.errors)
+
+    return invoice_details, _unique_strings(errors)
+
+
 def _operation_code(operation_id: str, pedimento_data: object) -> str:
     if operation_id:
         return _safe_upload_name(operation_id)
@@ -274,11 +332,16 @@ def _customs_mvp_result(metadata: dict[str, object], saved_support_files: list[s
     missing_required = metadata.get("missing_required_documents")
     missing_support = metadata.get("missing_support_documents")
     loaded_documents = metadata.get("loaded_documents")
+    invoice_details = metadata.get("invoice_details")
+    invoice_parse_errors = metadata.get("commercial_invoice_parse_errors")
     missing_count = _metadata_count(missing_required) + _metadata_count(missing_support)
     findings = []
 
     if missing_count:
         findings.append("Expediente parcial: existen documentos no cargados que deben tratarse como brechas documentales.")
+
+    if isinstance(invoice_parse_errors, list):
+        findings.extend(str(error) for error in invoice_parse_errors if error)
 
     if not findings:
         findings.append("Expediente recibido para revisión documental aduanera sin brechas documentales declaradas.")
@@ -287,6 +350,7 @@ def _customs_mvp_result(metadata: dict[str, object], saved_support_files: list[s
         "compliance_percent": max(0, 100 - (missing_count * 8)),
         "executive_dictamen": "Resultado preliminar generado para Customs Compliance. El paquete documental fue recibido en el VPS y será evaluado con brechas documentales cuando aplique.",
         "findings": findings,
+        "invoice_details": invoice_details if isinstance(invoice_details, list) else [],
         "loaded_documents": loaded_documents,
         "metadata": {
             **metadata,
@@ -298,6 +362,20 @@ def _customs_mvp_result(metadata: dict[str, object], saved_support_files: list[s
         "risk_level": "Medium" if missing_count else "Low",
         "top_critical_gaps": findings,
     }
+
+
+def _unique_strings(values: list[str]) -> list[str]:
+    unique = []
+    seen = set()
+
+    for value in values:
+        normalized = value.strip()
+        if not normalized or normalized in seen:
+            continue
+        unique.append(normalized)
+        seen.add(normalized)
+
+    return unique
 
 
 def _customs_error(code: str, status_code: int, message: str) -> JSONResponse:
