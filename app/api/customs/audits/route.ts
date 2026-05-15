@@ -27,6 +27,7 @@ type PersistAuditPayload = {
 type CustomsAuditRow = {
   audit_group_id?: string;
   audit_version?: number | string;
+  deleted_at?: string | null;
   id?: string;
 };
 
@@ -58,6 +59,11 @@ export async function POST(request: Request) {
   const operationCode = text(pedimentoData.operation_code);
   const newAuditId = crypto.randomUUID();
   const parentAudit = await getParentAudit(requestPayload.parentAuditId ?? requestPayload.parent_audit_id, requestPayload.auditGroupId ?? requestPayload.audit_group_id, auth.accessToken);
+
+  if (parentAudit?.deleted_at) {
+    return NextResponse.json({ error: "PARENT_AUDIT_ARCHIVED" }, { status: 409 });
+  }
+
   const auditGroupId = text(parentAudit?.audit_group_id, requestPayload.auditGroupId, requestPayload.audit_group_id, parentAudit?.id, newAuditId);
   const auditVersion = parentAudit ? number(parentAudit.audit_version, 1) + 1 : 1;
 
@@ -151,6 +157,9 @@ async function getParentAudit(parentAuditId: unknown, auditGroupId: unknown, acc
       is_latest: true,
     },
     limit: 1,
+    params: {
+      deleted_at: "is.null",
+    },
   });
 
   return rows[0] ?? null;

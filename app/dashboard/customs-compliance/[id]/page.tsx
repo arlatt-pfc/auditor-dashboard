@@ -18,6 +18,9 @@ type CustomsAuditRow = {
   compliance_percent?: number | string | null;
   created_at?: string | null;
   customs_office?: string | null;
+  delete_reason?: string | null;
+  deleted_at?: string | null;
+  deleted_by?: string | null;
   executive_dictamen?: string | null;
   findings?: unknown;
   id?: string | null;
@@ -100,12 +103,14 @@ export default async function CustomsAuditDetailPage({ params }: CustomsAuditDet
             >
               Volver al histórico
             </Link>
-            <Link
-              className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-              href={`/dashboard/customs-compliance/new?parent_audit_id=${encodeURIComponent(text(audit.id))}`}
-            >
-              Reauditar expediente
-            </Link>
+            {!audit.deleted_at ? (
+              <Link
+                className="rounded-2xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+                href={`/dashboard/customs-compliance/new?parent_audit_id=${encodeURIComponent(text(audit.id))}`}
+              >
+                Reauditar expediente
+              </Link>
+            ) : null}
             <CustomsAuditPdfButton
               auditResult={auditResult(audit)}
               expediente={text(audit.operation_code, audit.id, "expediente")}
@@ -118,6 +123,15 @@ export default async function CustomsAuditDetailPage({ params }: CustomsAuditDet
       />
 
       <div className="mx-auto max-w-7xl space-y-6 px-6 py-8">
+        {audit.deleted_at ? (
+          <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+            <p className="text-sm font-semibold text-amber-900">Auditoría archivada</p>
+            <p className="mt-2 text-sm leading-6 text-amber-800">
+              Esta auditoría fue archivada el {formatDate(audit.deleted_at)} y no puede reauditarse.
+            </p>
+            {text(audit.delete_reason) ? <p className="mt-2 text-sm text-amber-800">Motivo: {text(audit.delete_reason)}</p> : null}
+          </section>
+        ) : null}
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <KpiCard label="Cumplimiento" value={formatPercent(audit.compliance_percent)} hint="estimado" />
           <KpiCard label="Nivel de riesgo" value={text(audit.risk_level, "unknown")} hint={text(audit.status, "completed")} />
@@ -182,6 +196,9 @@ async function getVersionHistory(audit: CustomsAuditRow, accessToken?: string) {
     order: {
       ascending: false,
       column: "audit_version",
+    },
+    params: audit.deleted_at ? undefined : {
+      deleted_at: "is.null",
     },
   });
 

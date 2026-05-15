@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { connection } from "next/server";
 
+import { ArchiveCustomsAuditButton } from "@/components/dashboard/customs/ArchiveCustomsAuditButton";
 import { CustomsAuditPdfButton } from "@/components/dashboard/customs/CustomsAuditPdfButton";
 import { Header } from "@/components/dashboard/Header";
 import { PageShell } from "@/components/dashboard/PageShell";
@@ -22,6 +23,7 @@ type CustomsAuditRow = {
   findings?: unknown;
   id?: string | null;
   importer_name?: string | null;
+  deleted_at?: string | null;
   loaded_documents?: unknown;
   missing_documents?: unknown;
   operation_code?: string | null;
@@ -66,6 +68,9 @@ export default async function CustomsCompliancePage({ searchParams }: CustomsCom
     order: {
       ascending: false,
       column: "created_at",
+    },
+    params: {
+      deleted_at: "is.null",
     },
   });
   const audits = rows.filter((row) => matchesFilters(row, filters));
@@ -176,6 +181,7 @@ export default async function CustomsCompliancePage({ searchParams }: CustomsCom
                             missingDocuments={arrayFrom(audit.missing_documents)}
                             pedimentoData={pedimentoData(audit)}
                           />
+                          {text(audit.id) ? <ArchiveCustomsAuditButton auditId={text(audit.id)} /> : null}
                         </div>
                       </td>
                     </tr>

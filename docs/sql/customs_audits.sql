@@ -30,6 +30,9 @@ create table if not exists public.customs_audits (
   is_latest boolean default true,
   rerun_reason text,
   documents_added jsonb default '[]'::jsonb,
+  deleted_at timestamptz,
+  deleted_by uuid references auth.users(id),
+  delete_reason text,
   status text default 'completed'
 );
 
@@ -40,7 +43,10 @@ alter table public.customs_audits
   add column if not exists superseded_by uuid references public.customs_audits(id),
   add column if not exists is_latest boolean default true,
   add column if not exists rerun_reason text,
-  add column if not exists documents_added jsonb default '[]'::jsonb;
+  add column if not exists documents_added jsonb default '[]'::jsonb,
+  add column if not exists deleted_at timestamptz,
+  add column if not exists deleted_by uuid references auth.users(id),
+  add column if not exists delete_reason text;
 
 create index if not exists idx_customs_audits_operation_code on public.customs_audits(operation_code);
 create index if not exists idx_customs_audits_pedimento_number on public.customs_audits(pedimento_number);
@@ -48,6 +54,7 @@ create index if not exists idx_customs_audits_importer_name on public.customs_au
 create index if not exists idx_customs_audits_created_at_desc on public.customs_audits(created_at desc);
 create index if not exists idx_customs_audits_audit_group_id on public.customs_audits(audit_group_id);
 create index if not exists idx_customs_audits_latest on public.customs_audits(audit_group_id, is_latest);
+create index if not exists idx_customs_audits_deleted_at on public.customs_audits(deleted_at);
 
 alter table public.customs_audits enable row level security;
 

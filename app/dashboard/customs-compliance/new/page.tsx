@@ -15,6 +15,7 @@ type NewCustomsExpedientPageProps = {
 type CustomsAuditRow = {
   audit_group_id?: string | null;
   audit_version?: number | string | null;
+  deleted_at?: string | null;
   id?: string | null;
   loaded_documents?: unknown;
   missing_documents?: unknown;
@@ -76,7 +77,7 @@ async function getRerunContext(parentAuditId: string, accessToken?: string): Pro
   });
   const parent = rows[0];
 
-  if (!parent?.id) {
+  if (!parent?.id || parent.deleted_at) {
     return null;
   }
 
