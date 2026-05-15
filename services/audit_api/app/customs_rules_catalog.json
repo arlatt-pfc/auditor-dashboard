@@ -1,62 +1,642 @@
 [
   {
-    "rule_code": "INV_PED_VALUE_MATCH",
-    "rule_name": "Coincidencia de valor factura vs pedimento",
-    "category": "valuation",
-    "severity": "High",
-    "enabled": true,
-    "parameters": {
-      "allowed_variance_percent": 3
-    },
-    "legal_basis": "Ley Aduanera arts. 64-78; reglas generales de valoración aduanera aplicables.",
-    "recommendation_template": "Validar que el valor comercial de facturas coincida razonablemente con el valor declarado en pedimento. Diferencia detectada: {variance_percent}%."
+    "rule_code": "DOC_BASE_PEDIMENTO_REQUIRED",
+    "rule_name": "Pedimento base requerido",
+    "category": "Document Integrity",
+    "severity": "Critical",
+    "enabled": false,
+    "parameters": { "priority": true, "document_type": "pedimento" },
+    "legal_basis": "Ley Aduanera art. 36 y 36-A; obligación de contar con pedimento y anexos del despacho.",
+    "recommendation_template": "Integrar el pedimento base validado antes de emitir dictamen de cumplimiento."
   },
   {
-    "rule_code": "CERTIFICATE_OF_ORIGIN_REQUIRED",
-    "rule_name": "Certificado de origen requerido",
-    "category": "origin",
-    "severity": "Medium",
-    "enabled": true,
-    "parameters": {
-      "required_when_tariff_preference_claimed": true
-    },
-    "legal_basis": "T-MEC y reglas de certificación de origen aplicables cuando se solicita trato preferencial.",
-    "recommendation_template": "Integrar certificado o certificación de origen cuando exista trato preferencial o riesgo de origen."
+    "rule_code": "COMMERCIAL_INVOICE_REQUIRED",
+    "rule_name": "Factura comercial requerida",
+    "category": "Document Integrity",
+    "severity": "Critical",
+    "enabled": false,
+    "parameters": { "priority": true, "document_type": "commercial_invoice" },
+    "legal_basis": "Ley Aduanera art. 36-A; documentación que ampara el valor comercial de las mercancías.",
+    "recommendation_template": "Agregar factura comercial del proveedor con número, fecha, moneda, Incoterm y valor."
+  },
+  {
+    "rule_code": "BROKER_EXPENSE_ACCOUNT_REQUIRED",
+    "rule_name": "Cuenta de gastos requerida",
+    "category": "Document Integrity",
+    "severity": "Critical",
+    "enabled": false,
+    "parameters": { "priority": true, "document_type": "broker_expense_account" },
+    "legal_basis": "Ley Aduanera y reglas de conservación documental; soporte de pagos y honorarios del agente aduanal.",
+    "recommendation_template": "Integrar cuenta de gastos del agente aduanal para validar contribuciones, honorarios y cargos."
   },
   {
     "rule_code": "COVE_REQUIRED",
     "rule_name": "COVE requerido",
-    "category": "digital_documents",
+    "category": "Document Integrity",
     "severity": "Medium",
     "enabled": true,
-    "parameters": {
-      "required_when_invoices_present": true
-    },
+    "parameters": { "priority": true, "required_when_invoices_present": true },
     "legal_basis": "Reglas de Comercio Exterior aplicables a transmisión de valor y comercialización mediante COVE.",
     "recommendation_template": "Adjuntar acuse o detalle COVE asociado a las facturas comerciales declaradas."
   },
   {
+    "rule_code": "DOC_FILE_TEXT_EXTRACTABLE",
+    "rule_name": "Documento legible y extraíble",
+    "category": "Document Integrity",
+    "severity": "High",
+    "enabled": false,
+    "parameters": { "priority": true, "minimum_text_length": 40 },
+    "legal_basis": "Obligación de conservar documentación comprobatoria clara, íntegra y disponible para revisión.",
+    "recommendation_template": "Reemplazar documentos escaneados no legibles o cargar versión con texto extraíble/OCR validado."
+  },
+  {
+    "rule_code": "DOC_DUPLICATE_FILE_DETECTED",
+    "rule_name": "Documento duplicado detectado",
+    "category": "Document Integrity",
+    "severity": "Low",
+    "enabled": false,
+    "parameters": { "priority": false, "match_by": ["file_name", "document_hash"] },
+    "legal_basis": "Control interno de expediente y trazabilidad documental.",
+    "recommendation_template": "Depurar documentos duplicados para evitar doble conteo de evidencia."
+  },
+  {
+    "rule_code": "DOC_REQUIRED_METADATA_COMPLETE",
+    "rule_name": "Metadata documental completa",
+    "category": "Document Integrity",
+    "severity": "Medium",
+    "enabled": false,
+    "parameters": { "priority": false, "required_fields": ["document_type", "file_name"] },
+    "legal_basis": "Buenas prácticas de control documental y trazabilidad de expediente.",
+    "recommendation_template": "Completar tipo documental y nombre de archivo en toda evidencia cargada."
+  },
+  {
+    "rule_code": "TRANSLATION_REQUIRED",
+    "rule_name": "Traducción o anexo aclaratorio requerido",
+    "category": "Document Integrity",
+    "severity": "Medium",
+    "enabled": true,
+    "parameters": { "priority": true, "detect_foreign_provider": true, "accepted_documents": ["translation", "annex"] },
+    "legal_basis": "Obligación de conservar documentación comprobatoria comprensible y suficiente para revisión de comercio exterior.",
+    "recommendation_template": "Integrar traducción, anexo o carta aclaratoria cuando la factura o evidencia soporte esté en idioma extranjero."
+  },
+  {
+    "rule_code": "INV_PED_VALUE_MATCH",
+    "rule_name": "Coincidencia de valor factura vs pedimento",
+    "category": "Financial Validation",
+    "severity": "High",
+    "enabled": true,
+    "parameters": { "priority": true, "allowed_variance_percent": 3 },
+    "legal_basis": "Ley Aduanera arts. 64-78; reglas generales de valoración aduanera aplicables.",
+    "recommendation_template": "Validar que el valor comercial de facturas coincida razonablemente con el valor declarado en pedimento. Diferencia detectada: {variance_percent}%."
+  },
+  {
+    "rule_code": "MULTI_INVOICE_TOTAL_MATCH",
+    "rule_name": "Conciliación de total multipágina de facturas",
+    "category": "Financial Validation",
+    "severity": "High",
+    "enabled": true,
+    "parameters": { "priority": true, "tolerance_percent": 3 },
+    "legal_basis": "Ley Aduanera arts. 64-78; valoración aduanera y soporte del valor comercial con facturas.",
+    "recommendation_template": "Conciliar el total de facturas comerciales detectadas contra el valor en dólares del pedimento. Diferencia detectada: {variance_percent}%."
+  },
+  {
+    "rule_code": "EXCHANGE_RATE_VALIDATION",
+    "rule_name": "Validación de tipo de cambio",
+    "category": "Financial Validation",
+    "severity": "High",
+    "enabled": true,
+    "parameters": { "priority": true, "tolerance_percent": 3 },
+    "legal_basis": "Ley Aduanera y reglas fiscales aplicables a conversión de moneda en operaciones de comercio exterior.",
+    "recommendation_template": "Validar el tipo de cambio declarado y su conversión contra valor en dólares y valor comercial pagado. Diferencia detectada: {variance_percent}%."
+  },
+  {
+    "rule_code": "CUSTOMS_VALUE_PRESENT",
+    "rule_name": "Valor aduana presente",
+    "category": "Financial Validation",
+    "severity": "High",
+    "enabled": false,
+    "parameters": { "priority": true, "field": "customs_value_mxn" },
+    "legal_basis": "Ley Aduanera arts. 64-78; base gravable del impuesto general de importación.",
+    "recommendation_template": "Validar que el pedimento contenga valor aduana en moneda nacional."
+  },
+  {
+    "rule_code": "COMMERCIAL_VALUE_USD_PRESENT",
+    "rule_name": "Valor en dólares presente",
+    "category": "Financial Validation",
+    "severity": "Medium",
+    "enabled": false,
+    "parameters": { "priority": true, "field": "commercial_value_usd" },
+    "legal_basis": "Reglas de valoración y soporte de precio pagado o por pagar.",
+    "recommendation_template": "Validar valor en dólares contra facturas comerciales y pedimento."
+  },
+  {
+    "rule_code": "INVOICE_CURRENCY_DECLARED",
+    "rule_name": "Moneda de factura declarada",
+    "category": "Financial Validation",
+    "severity": "Medium",
+    "enabled": false,
+    "parameters": { "priority": false, "required_invoice_field": "currency" },
+    "legal_basis": "Control documental de valor comercial y moneda pactada.",
+    "recommendation_template": "Solicitar factura comercial con moneda claramente identificada."
+  },
+  {
+    "rule_code": "INVOICE_DATE_PRESENT",
+    "rule_name": "Fecha de factura presente",
+    "category": "Financial Validation",
+    "severity": "Low",
+    "enabled": false,
+    "parameters": { "priority": false, "required_invoice_field": "invoice_date" },
+    "legal_basis": "Control de trazabilidad comercial y soporte de operación.",
+    "recommendation_template": "Validar que cada factura comercial tenga fecha legible."
+  },
+  {
+    "rule_code": "CERTIFICATE_OF_ORIGIN_REQUIRED",
+    "rule_name": "Certificado de origen requerido",
+    "category": "Origin & Trade Agreements",
+    "severity": "Medium",
+    "enabled": true,
+    "parameters": { "priority": true, "required_when_tariff_preference_claimed": true },
+    "legal_basis": "T-MEC y reglas de certificación de origen aplicables cuando se solicita trato preferencial.",
+    "recommendation_template": "Integrar certificado o certificación de origen cuando exista trato preferencial o riesgo de origen."
+  },
+  {
+    "rule_code": "ORIGIN_COUNTRY_DECLARED",
+    "rule_name": "País de origen declarado",
+    "category": "Origin & Trade Agreements",
+    "severity": "Medium",
+    "enabled": false,
+    "parameters": { "priority": true, "required_field": "country_of_origin" },
+    "legal_basis": "Ley Aduanera y tratados comerciales aplicables a origen de mercancías.",
+    "recommendation_template": "Validar país de origen contra factura, certificado y documentación del proveedor."
+  },
+  {
+    "rule_code": "TMEC_CERT_MINIMUM_DATA",
+    "rule_name": "Datos mínimos de certificación T-MEC",
+    "category": "Origin & Trade Agreements",
+    "severity": "High",
+    "enabled": false,
+    "parameters": { "priority": true, "required_fields": ["certifier", "producer", "importer", "origin_criterion", "period"] },
+    "legal_basis": "T-MEC, capítulo de Reglas de Origen y Procedimientos de Origen.",
+    "recommendation_template": "Verificar que la certificación T-MEC contenga datos mínimos obligatorios y firma/responsable."
+  },
+  {
+    "rule_code": "PREFERENTIAL_DUTY_SUPPORT",
+    "rule_name": "Soporte de trato arancelario preferencial",
+    "category": "Origin & Trade Agreements",
+    "severity": "High",
+    "enabled": false,
+    "parameters": { "priority": true, "requires_origin_support_when_igi_zero": true },
+    "legal_basis": "Tratados de libre comercio y reglas para aplicar preferencias arancelarias.",
+    "recommendation_template": "Cuando IGI sea cero o preferencial, integrar soporte de origen aplicable."
+  },
+  {
+    "rule_code": "COUNTRY_OF_ORIGIN_MATCH",
+    "rule_name": "Coincidencia de país de origen",
+    "category": "Origin & Trade Agreements",
+    "severity": "Medium",
+    "enabled": true,
+    "parameters": { "priority": true, "compare_pedimento_invoice_certificate": true },
+    "legal_basis": "Control de origen, proveedor y cadena de suministro.",
+    "recommendation_template": "Validar que el país de origen coincida entre pedimento, factura y certificado cuando esos datos estén disponibles."
+  },
+  {
+    "rule_code": "ORIGIN_CERT_VALIDITY_PERIOD",
+    "rule_name": "Vigencia de certificado de origen",
+    "category": "Origin & Trade Agreements",
+    "severity": "Medium",
+    "enabled": false,
+    "parameters": { "priority": false, "allow_blanket_period": true },
+    "legal_basis": "Reglas de origen y vigencia de certificaciones bajo tratados comerciales.",
+    "recommendation_template": "Confirmar que la certificación de origen cubra la fecha de importación."
+  },
+  {
     "rule_code": "INCOTERM_CONSISTENCY",
     "rule_name": "Consistencia de Incoterm",
-    "category": "commercial_terms",
+    "category": "Incoterms & Customs Valuation",
     "severity": "Low",
     "enabled": true,
-    "parameters": {
-      "allowed_incoterms": ["EXW", "FCA", "FAS", "FOB", "CFR", "CIF", "CPT", "CIP", "DAP", "DPU", "DDP"]
-    },
+    "parameters": { "priority": true, "allowed_incoterms": ["EXW", "FCA", "FAS", "FOB", "CFR", "CIF", "CPT", "CIP", "DAP", "DPU", "DDP"] },
     "legal_basis": "Incoterms ICC vigentes y soporte documental de términos de compraventa.",
     "recommendation_template": "Verificar que el Incoterm de factura sea válido y consistente con transporte, valor declarado y gastos incrementables."
   },
   {
+    "rule_code": "INCREMENTABLES_SUPPORT_REQUIRED",
+    "rule_name": "Soporte de incrementables requerido",
+    "category": "Incoterms & Customs Valuation",
+    "severity": "High",
+    "enabled": false,
+    "parameters": { "priority": true, "requires_freight_insurance_support": true },
+    "legal_basis": "Ley Aduanera arts. 65 y 66; conceptos incrementables y no incrementables.",
+    "recommendation_template": "Integrar soporte de flete, seguro y gastos incrementables cuando el Incoterm lo requiera."
+  },
+  {
+    "rule_code": "NON_INCREMENTABLES_SEPARATED",
+    "rule_name": "No incrementables separados",
+    "category": "Incoterms & Customs Valuation",
+    "severity": "Medium",
+    "enabled": false,
+    "parameters": { "priority": false, "requires_separated_charges": true },
+    "legal_basis": "Ley Aduanera art. 66; gastos no incrementables al valor de transacción.",
+    "recommendation_template": "Separar gastos no incrementables para evitar sobrevaloración o base gravable incorrecta."
+  },
+  {
+    "rule_code": "BILL_OF_LADING_REQUIRED",
+    "rule_name": "Bill of Lading o documento de transporte requerido",
+    "category": "Incoterms & Customs Valuation",
+    "severity": "Medium",
+    "enabled": true,
+    "parameters": { "priority": true, "accepted_documents": ["bill_of_lading", "transport_document"] },
+    "legal_basis": "Reglas de valoración aduanera e Incoterms ICC.",
+    "recommendation_template": "Adjuntar Bill of Lading, Air Waybill o documento de transporte equivalente para soportar embarque y logística."
+  },
+  {
+    "rule_code": "INSURANCE_SUPPORT_REQUIRED",
+    "rule_name": "Soporte de seguro requerido",
+    "category": "Incoterms & Customs Valuation",
+    "severity": "Low",
+    "enabled": false,
+    "parameters": { "priority": false, "incoterms": ["CIF", "CIP"] },
+    "legal_basis": "Incoterms ICC y reglas de valoración sobre seguro.",
+    "recommendation_template": "Adjuntar póliza, factura o evidencia de seguro para operaciones CIF/CIP."
+  },
+  {
+    "rule_code": "ASSIST_ROYALTY_REVIEW",
+    "rule_name": "Revisión de asistencias y regalías",
+    "category": "Incoterms & Customs Valuation",
+    "severity": "Medium",
+    "enabled": false,
+    "parameters": { "priority": false, "review_related_party_or_royalties": true },
+    "legal_basis": "Ley Aduanera art. 65; regalías, asistencias y pagos relacionados con mercancías importadas.",
+    "recommendation_template": "Confirmar si existen regalías, asistencias o pagos indirectos que deban adicionarse al valor aduana."
+  },
+  {
+    "rule_code": "TARIFF_ITEM_VALID_FORMAT",
+    "rule_name": "Formato válido de fracción arancelaria",
+    "category": "Tariff Classification",
+    "severity": "High",
+    "enabled": false,
+    "parameters": { "priority": true, "digits": 8, "reject_all_zeroes": true },
+    "legal_basis": "LIGIE y TIGIE; clasificación arancelaria a nivel fracción.",
+    "recommendation_template": "Corregir fracciones arancelarias inválidas o incompletas antes de dictaminar."
+  },
+  {
     "rule_code": "DATA_SHEET_AUTHENTICITY",
     "rule_name": "Autenticidad de hoja de datos",
-    "category": "classification_support",
+    "category": "Tariff Classification",
     "severity": "Low",
-    "enabled": true,
-    "parameters": {
-      "required_when_tariff_items_present": true
-    },
+    "enabled": false,
+    "parameters": { "priority": true, "required_when_tariff_items_present": true },
     "legal_basis": "Obligación de conservar documentación soporte para clasificación arancelaria y descripción de mercancías.",
     "recommendation_template": "Conservar ficha técnica, catálogo o especificación emitida por proveedor/fabricante para soportar clasificación arancelaria."
+  },
+  {
+    "rule_code": "TECHNICAL_SUPPORT_REQUIRED",
+    "rule_name": "Soporte técnico requerido",
+    "category": "Tariff Classification",
+    "severity": "Medium",
+    "enabled": true,
+    "parameters": { "priority": true, "accepted_documents": ["data_sheet", "catalog", "technical_spec"] },
+    "legal_basis": "Ley Aduanera art. 59; obligaciones de clasificación y documentación soporte.",
+    "recommendation_template": "Integrar ficha técnica, catálogo o especificación técnica que soporte la identificación y clasificación de la mercancía."
+  },
+  {
+    "rule_code": "TARIFF_NICO_PRESENT",
+    "rule_name": "NICO presente cuando aplique",
+    "category": "Tariff Classification",
+    "severity": "Low",
+    "enabled": false,
+    "parameters": { "priority": false, "required_digits": 10 },
+    "legal_basis": "TIGIE y números de identificación comercial aplicables.",
+    "recommendation_template": "Validar NICO declarado cuando el análisis requiera clasificación a 10 dígitos."
+  },
+  {
+    "rule_code": "UOM_CONSISTENCY",
+    "rule_name": "Consistencia de unidad de medida",
+    "category": "Tariff Classification",
+    "severity": "Medium",
+    "enabled": false,
+    "parameters": { "priority": false, "compare_invoice_vs_pedimento_uom": true },
+    "legal_basis": "TIGIE y reglas de declaración de unidades de medida de tarifa y comercialización.",
+    "recommendation_template": "Validar unidad de medida comercial y de tarifa contra factura y descripción de mercancía."
+  },
+  {
+    "rule_code": "PRODUCT_DESCRIPTION_COMPLETENESS",
+    "rule_name": "Completitud de descripción de producto",
+    "category": "Tariff Classification",
+    "severity": "Medium",
+    "enabled": true,
+    "parameters": { "priority": true, "min_description_length": 12 },
+    "legal_basis": "Obligaciones de clasificación arancelaria y descripción comercial de mercancías.",
+    "recommendation_template": "Complementar la descripción de mercancía con marca, modelo, función, material, uso y características técnicas suficientes."
+  },
+  {
+    "rule_code": "NOM_COMPLIANCE_REVIEW",
+    "rule_name": "Revisión de cumplimiento NOM",
+    "category": "Regulatory Compliance",
+    "severity": "High",
+    "enabled": false,
+    "parameters": { "priority": true, "review_nom_annexes": true },
+    "legal_basis": "Ley de Infraestructura de la Calidad y acuerdos de NOMs aplicables a importación.",
+    "recommendation_template": "Validar si las fracciones importadas están sujetas a NOM y anexar cumplimiento o excepción."
+  },
+  {
+    "rule_code": "RRNA_PERMIT_REQUIRED",
+    "rule_name": "Permiso o RRNA requerido",
+    "category": "Regulatory Compliance",
+    "severity": "High",
+    "enabled": false,
+    "parameters": { "priority": true, "review_non_tariff_regulations": true },
+    "legal_basis": "Ley de Comercio Exterior y acuerdos de regulaciones y restricciones no arancelarias.",
+    "recommendation_template": "Verificar permisos, avisos o autorizaciones aplicables a la fracción arancelaria."
+  },
+  {
+    "rule_code": "SERIAL_NUMBER_TRACEABILITY",
+    "rule_name": "Trazabilidad de números de serie",
+    "category": "Regulatory Compliance",
+    "severity": "Medium",
+    "enabled": false,
+    "parameters": { "priority": false, "required_for_identifiable_goods": true },
+    "legal_basis": "Control de identificación individual de mercancías cuando aplique.",
+    "recommendation_template": "Conservar listas de serie/modelo para mercancías identificables."
+  },
+  {
+    "rule_code": "HAZMAT_DOCUMENTATION_REQUIRED",
+    "rule_name": "Documentación de mercancía peligrosa",
+    "category": "Regulatory Compliance",
+    "severity": "High",
+    "enabled": false,
+    "parameters": { "priority": false, "requires_sds": true },
+    "legal_basis": "Regulación de transporte y manejo de materiales peligrosos; NOMs aplicables.",
+    "recommendation_template": "Adjuntar hoja de seguridad, clasificación de riesgo y permisos aplicables si la mercancía es peligrosa."
+  },
+  {
+    "rule_code": "ANTIDUMPING_REVIEW",
+    "rule_name": "Revisión de cuotas compensatorias",
+    "category": "Regulatory Compliance",
+    "severity": "High",
+    "enabled": false,
+    "parameters": { "priority": true, "review_antidumping_duties": true },
+    "legal_basis": "Ley de Comercio Exterior y resoluciones de cuotas compensatorias vigentes.",
+    "recommendation_template": "Validar si la fracción, origen o proveedor está sujeto a cuota compensatoria."
+  },
+  {
+    "rule_code": "IMPORTER_REGISTRY_VALIDATION",
+    "rule_name": "Validación de padrón de importadores",
+    "category": "Regulatory Compliance",
+    "severity": "Medium",
+    "enabled": false,
+    "parameters": { "priority": false, "requires_importer_registry": true },
+    "legal_basis": "Reglas fiscales y aduaneras aplicables al padrón de importadores y sectores específicos.",
+    "recommendation_template": "Confirmar que el importador cuenta con padrón y sector específico cuando aplique."
+  },
+  {
+    "rule_code": "IGI_PRESENT",
+    "rule_name": "IGI presente",
+    "category": "Taxes & Duties",
+    "severity": "High",
+    "enabled": false,
+    "parameters": { "priority": true, "field": "igi_mxn" },
+    "legal_basis": "Ley de los Impuestos Generales de Importación y Exportación; Ley Aduanera.",
+    "recommendation_template": "Validar cálculo y declaración de IGI en el pedimento."
+  },
+  {
+    "rule_code": "IVA_PRESENT",
+    "rule_name": "IVA presente",
+    "category": "Taxes & Duties",
+    "severity": "High",
+    "enabled": false,
+    "parameters": { "priority": true, "field": "iva_mxn" },
+    "legal_basis": "Ley del IVA aplicable a importación de bienes.",
+    "recommendation_template": "Validar cálculo y declaración de IVA de importación."
+  },
+  {
+    "rule_code": "DTA_PRESENT",
+    "rule_name": "DTA presente",
+    "category": "Taxes & Duties",
+    "severity": "Medium",
+    "enabled": false,
+    "parameters": { "priority": true, "field": "dta_mxn" },
+    "legal_basis": "Ley Federal de Derechos; Derecho de Trámite Aduanero.",
+    "recommendation_template": "Validar pago de DTA y su correspondencia con el pedimento."
+  },
+  {
+    "rule_code": "PRV_PRESENT",
+    "rule_name": "PRV presente",
+    "category": "Taxes & Duties",
+    "severity": "Low",
+    "enabled": false,
+    "parameters": { "priority": false, "field": "prv_mxn" },
+    "legal_basis": "Prevalidación y contraprestaciones aplicables al despacho aduanero.",
+    "recommendation_template": "Validar prevalidación y cargos relacionados."
+  },
+  {
+    "rule_code": "TAX_BASE_CONSISTENCY",
+    "rule_name": "Consistencia de base gravable y contribuciones",
+    "category": "Taxes & Duties",
+    "severity": "High",
+    "enabled": true,
+    "parameters": { "priority": true, "tolerance_percent": 5, "max_contribution_ratio_percent": 60 },
+    "legal_basis": "Ley Aduanera y disposiciones fiscales aplicables a contribuciones de comercio exterior.",
+    "recommendation_template": "Revisar valor aduana, valor comercial pagado y contribuciones declaradas. Diferencia detectada: {variance_percent}%."
+  },
+  {
+    "rule_code": "PAYMENT_DATE_PRESENT",
+    "rule_name": "Fecha de pago presente",
+    "category": "Taxes & Duties",
+    "severity": "Medium",
+    "enabled": false,
+    "parameters": { "priority": false, "field": "payment_date" },
+    "legal_basis": "Control fiscal de pago de contribuciones en pedimento.",
+    "recommendation_template": "Validar fecha de pago y su correspondencia con el despacho."
+  },
+  {
+    "rule_code": "BROKER_PATENT_PRESENT",
+    "rule_name": "Patente de agente aduanal presente",
+    "category": "Customs Broker Controls",
+    "severity": "Medium",
+    "enabled": false,
+    "parameters": { "priority": true, "field": "broker_patent" },
+    "legal_basis": "Ley Aduanera; actuación mediante agente o agencia aduanal autorizada.",
+    "recommendation_template": "Validar patente del agente aduanal declarada en pedimento."
+  },
+  {
+    "rule_code": "BROKER_NAME_PRESENT",
+    "rule_name": "Nombre de agente/agencia presente",
+    "category": "Customs Broker Controls",
+    "severity": "Low",
+    "enabled": false,
+    "parameters": { "priority": false, "field": "broker_name" },
+    "legal_basis": "Control de trazabilidad de agente/agencia responsable del despacho.",
+    "recommendation_template": "Capturar nombre de agente o agencia aduanal responsable."
+  },
+  {
+    "rule_code": "BROKER_EXPENSES_MATCH_TAXES",
+    "rule_name": "Cuenta de gastos contra contribuciones",
+    "category": "Customs Broker Controls",
+    "severity": "High",
+    "enabled": false,
+    "parameters": { "priority": true, "compare_expense_account_to_pedimento": true },
+    "legal_basis": "Control interno de pagos, contribuciones y cargos del agente aduanal.",
+    "recommendation_template": "Comparar cuenta de gastos contra contribuciones y pagos declarados en pedimento."
+  },
+  {
+    "rule_code": "CFDI_XML_REQUIRED",
+    "rule_name": "CFDI XML del agente requerido",
+    "category": "Customs Broker Controls",
+    "severity": "Medium",
+    "enabled": true,
+    "parameters": { "priority": true, "accepted_documents": ["cfdi_xml", "cfdi_xml_agent"] },
+    "legal_basis": "Disposiciones fiscales aplicables a comprobantes por servicios del agente aduanal.",
+    "recommendation_template": "Adjuntar CFDI XML del agente aduanal para validar datos fiscales timbrados."
+  },
+  {
+    "rule_code": "CFDI_PDF_REQUIRED",
+    "rule_name": "CFDI PDF del agente requerido",
+    "category": "Customs Broker Controls",
+    "severity": "Medium",
+    "enabled": true,
+    "parameters": { "priority": true, "accepted_documents": ["cfdi_pdf", "cfdi_pdf_agent"] },
+    "legal_basis": "Disposiciones fiscales aplicables a comprobantes por servicios del agente aduanal.",
+    "recommendation_template": "Adjuntar representación impresa PDF del CFDI del agente aduanal."
+  },
+  {
+    "rule_code": "BROKER_RFC_VALIDATION",
+    "rule_name": "Validación RFC del agente",
+    "category": "Customs Broker Controls",
+    "severity": "Low",
+    "enabled": false,
+    "parameters": { "priority": false, "validate_rfc_format": true },
+    "legal_basis": "Control fiscal y trazabilidad de proveedores de servicios aduanales.",
+    "recommendation_template": "Validar RFC del agente/agencia contra CFDI y cuenta de gastos."
+  },
+  {
+    "rule_code": "BROKER_AUTHORIZATION_TRACE",
+    "rule_name": "Trazabilidad de encargo conferido",
+    "category": "Customs Broker Controls",
+    "severity": "Medium",
+    "enabled": false,
+    "parameters": { "priority": false, "requires_engagement_trace": true },
+    "legal_basis": "Ley Aduanera y reglas aplicables a encargo conferido y representación del importador.",
+    "recommendation_template": "Conservar evidencia de autorización o relación operativa con el agente aduanal."
+  },
+  {
+    "rule_code": "HIGH_VALUE_OPERATION_REVIEW",
+    "rule_name": "Revisión de operación de alto valor",
+    "category": "Preventive Risk",
+    "severity": "Medium",
+    "enabled": false,
+    "parameters": { "priority": true, "customs_value_threshold_mxn": 1000000 },
+    "legal_basis": "Controles preventivos de riesgo en operaciones de comercio exterior.",
+    "recommendation_template": "Aplicar revisión reforzada por monto de operación y conservar soporte de valor."
+  },
+  {
+    "rule_code": "NEW_PROVIDER_REVIEW",
+    "rule_name": "Revisión de proveedor nuevo",
+    "category": "Preventive Risk",
+    "severity": "Medium",
+    "enabled": false,
+    "parameters": { "priority": false, "review_provider_history": true },
+    "legal_basis": "Buenas prácticas de debida diligencia de proveedores internacionales.",
+    "recommendation_template": "Ejecutar revisión de alta de proveedor, beneficiario, país y documentación corporativa."
+  },
+  {
+    "rule_code": "RELATED_PARTY_REVIEW",
+    "rule_name": "Revisión de partes relacionadas",
+    "category": "Preventive Risk",
+    "severity": "High",
+    "enabled": false,
+    "parameters": { "priority": true, "review_related_party": true },
+    "legal_basis": "Ley Aduanera y Acuerdo de Valoración OMC sobre vinculación y valor de transacción.",
+    "recommendation_template": "Confirmar si existe vinculación comprador-vendedor y documentar que no afectó el precio."
+  },
+  {
+    "rule_code": "COUNTRY_RISK_REVIEW",
+    "rule_name": "Revisión de país de riesgo",
+    "category": "Preventive Risk",
+    "severity": "Medium",
+    "enabled": false,
+    "parameters": { "priority": false, "risk_country_lists": ["sanctions", "forced_labor", "trade_remedies"] },
+    "legal_basis": "Controles internos de riesgo comercial, sanciones y medidas de comercio exterior.",
+    "recommendation_template": "Revisar país de origen/procedencia contra listas de riesgo comercial y sanciones."
+  },
+  {
+    "rule_code": "UNUSUAL_VALUE_VARIATION",
+    "rule_name": "Variación inusual de valor",
+    "category": "Preventive Risk",
+    "severity": "Medium",
+    "enabled": false,
+    "parameters": { "priority": false, "allowed_historical_variance_percent": 20 },
+    "legal_basis": "Control preventivo de valoración y precios históricos.",
+    "recommendation_template": "Comparar valor unitario contra operaciones históricas y documentar variaciones relevantes."
+  },
+  {
+    "rule_code": "FORCED_LABOR_RISK_SCREENING",
+    "rule_name": "Screening de riesgo de trabajo forzoso",
+    "category": "Preventive Risk",
+    "severity": "High",
+    "enabled": false,
+    "parameters": { "priority": true, "requires_supply_chain_screening": true },
+    "legal_basis": "Controles de cumplimiento comercial y medidas internacionales sobre trabajo forzoso.",
+    "recommendation_template": "Ejecutar screening de proveedor, producto y país cuando exista riesgo de trabajo forzoso."
+  },
+  {
+    "rule_code": "AUDIT_VERSION_DELTA_REVIEW",
+    "rule_name": "Revisión de cambios entre versiones",
+    "category": "Governance & Continuous Audit",
+    "severity": "Low",
+    "enabled": false,
+    "parameters": { "priority": false, "compare_against_previous_version": true },
+    "legal_basis": "Gobierno de auditoría continua y trazabilidad de correcciones documentales.",
+    "recommendation_template": "Documentar documentos agregados, hallazgos resueltos y variación de cumplimiento entre versiones."
+  },
+  {
+    "rule_code": "MISSING_DOCUMENTS_AGING",
+    "rule_name": "Antigüedad de brechas documentales",
+    "category": "Governance & Continuous Audit",
+    "severity": "Medium",
+    "enabled": false,
+    "parameters": { "priority": false, "aging_days_threshold": 15 },
+    "legal_basis": "Control interno de remediación de hallazgos y seguimiento documental.",
+    "recommendation_template": "Escalar brechas documentales abiertas por más de {aging_days_threshold} días."
+  },
+  {
+    "rule_code": "RERUN_REASON_REQUIRED",
+    "rule_name": "Motivo de reauditoría requerido",
+    "category": "Governance & Continuous Audit",
+    "severity": "Low",
+    "enabled": false,
+    "parameters": { "priority": false, "required_for_versions_greater_than": 1 },
+    "legal_basis": "Trazabilidad de cambios y gobierno de auditoría continua.",
+    "recommendation_template": "Registrar motivo de reauditoría y documentos nuevos que justifican la versión."
+  },
+  {
+    "rule_code": "ARCHIVED_AUDIT_EXCLUDED",
+    "rule_name": "Auditoría archivada excluida",
+    "category": "Governance & Continuous Audit",
+    "severity": "Low",
+    "enabled": false,
+    "parameters": { "priority": false, "exclude_deleted_at_not_null": true },
+    "legal_basis": "Gobierno de registros históricos y control de auditorías de prueba o duplicadas.",
+    "recommendation_template": "Excluir auditorías archivadas de KPIs e histórico operativo, conservando trazabilidad."
+  },
+  {
+    "rule_code": "EVIDENCE_MINIMUM_SET_COMPLETE",
+    "rule_name": "Evidencia mínima completa",
+    "category": "Governance & Continuous Audit",
+    "severity": "Critical",
+    "enabled": false,
+    "parameters": { "priority": true, "minimum_documents": ["pedimento", "commercial_invoice", "broker_expense_account"] },
+    "legal_basis": "Política interna LDA Compliance para ejecución mínima de auditoría aduanal.",
+    "recommendation_template": "No cerrar auditoría sin pedimento, factura comercial y cuenta de gastos."
+  },
+  {
+    "rule_code": "EXECUTIVE_REPORT_READY",
+    "rule_name": "Reporte ejecutivo disponible",
+    "category": "Governance & Continuous Audit",
+    "severity": "Low",
+    "enabled": false,
+    "parameters": { "priority": false, "requires_pdf_report": true },
+    "legal_basis": "Gobierno de entregables ejecutivos y trazabilidad de dictamen.",
+    "recommendation_template": "Generar reporte PDF ejecutivo para expediente auditado y conservarlo en repositorio."
   }
 ]
