@@ -143,11 +143,14 @@ type ExistingDocument = {
 
 export type CustomsRerunContext = {
   auditGroupId: string;
+  currentAuditVersion: number;
   loadedDocuments: unknown[];
   missingDocuments: unknown[];
   nextAuditVersion: number;
   parentAuditId: string;
   pedimentoData: Record<string, unknown>;
+  previousCompliancePercent: number;
+  previousRiskLevel: string;
 };
 
 const emptyXmlData: PedimentoXmlData = {
@@ -788,6 +791,8 @@ export function CustomsExpedientWizard({ canExecute, rerunContext }: { canExecut
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      {rerunContext?.parentAuditId ? <RerunSummaryCard context={rerunContext} data={xmlData} /> : null}
+
       <div className="flex flex-wrap gap-2">
         {[1, 2, 3, 4].map((item) => (
           <button
@@ -1213,6 +1218,55 @@ function CriticalityIcon({ type }: { type: DocumentCriticality }) {
       <path d="M12 8v4" />
       <path d="M12 15h.01" />
     </svg>
+  );
+}
+
+function RerunSummaryCard({ context, data }: { context: CustomsRerunContext; data: PedimentoXmlData }) {
+  const supplierName = data.providers[0] || firstString(context.pedimentoData.providers);
+  const pendingGaps = context.missingDocuments.length;
+  const rows = [
+    ["Expediente", data.operation_code],
+    ["Grupo auditoría", context.auditGroupId],
+    ["Versión actual", `v${context.currentAuditVersion}`],
+    ["Siguiente versión", `v${context.nextAuditVersion}`],
+    ["Pedimento", data.pedimento_number],
+    ["Fecha pedimento", data.import_date || data.payment_date],
+    ["Importador", data.importer_name],
+    ["Agente aduanal", data.broker_name],
+    ["Proveedor principal", supplierName],
+    ["Riesgo anterior", context.previousRiskLevel],
+    ["Brechas pendientes", pendingGaps > 0 ? String(pendingGaps) : ""],
+  ].filter(([, value]) => Boolean(value));
+
+  return (
+    <section className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex flex-wrap items-center gap-3">
+            <h3 className="text-lg font-semibold text-emerald-950">Reauditoría de Expediente</h3>
+            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200">
+              v{context.currentAuditVersion} → v{context.nextAuditVersion}
+            </span>
+          </div>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-emerald-800">
+            Está generando una nueva versión del expediente utilizando la información previamente cargada. Puede agregar documentos faltantes o reemplazar evidencias existentes.
+          </p>
+        </div>
+        <div className="rounded-2xl bg-white px-4 py-3 text-right ring-1 ring-emerald-200">
+          <p className="text-xs font-semibold uppercase text-emerald-700">Cumplimiento anterior</p>
+          <p className="mt-1 text-2xl font-bold text-emerald-950">{Math.round(context.previousCompliancePercent)}%</p>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {rows.map(([label, value]) => (
+          <div className="rounded-xl bg-white px-3 py-2 ring-1 ring-emerald-100" key={label}>
+            <p className="text-xs font-semibold uppercase text-emerald-700">{label}</p>
+            <p className="mt-1 break-words text-sm font-medium text-emerald-950">{value}</p>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -1686,6 +1740,14 @@ function splitList(value: string) {
     .split(/[,\n]/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function firstString(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.find((item): item is string => typeof item === "string" && item.trim().length > 0)?.trim() ?? "";
+  }
+
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function stringValue(value: PedimentoXmlData[keyof PedimentoXmlData]) {

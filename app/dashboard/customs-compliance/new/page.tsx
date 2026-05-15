@@ -15,12 +15,15 @@ type NewCustomsExpedientPageProps = {
 type CustomsAuditRow = {
   audit_group_id?: string | null;
   audit_version?: number | string | null;
+  compliance_percent?: number | string | null;
   deleted_at?: string | null;
   id?: string | null;
   loaded_documents?: unknown;
   missing_documents?: unknown;
   operation_code?: string | null;
   pedimento_data?: Record<string, unknown> | null;
+  pedimento_number?: string | null;
+  risk_level?: string | null;
 };
 
 export default async function NewCustomsExpedientPage({ searchParams }: NewCustomsExpedientPageProps) {
@@ -83,11 +86,18 @@ async function getRerunContext(parentAuditId: string, accessToken?: string): Pro
 
   return {
     auditGroupId: text(parent.audit_group_id, parent.id),
+    currentAuditVersion: number(parent.audit_version, 1),
+    previousCompliancePercent: number(parent.compliance_percent, 0),
+    previousRiskLevel: text(parent.risk_level),
     loadedDocuments: arrayFrom(parent.loaded_documents),
     missingDocuments: arrayFrom(parent.missing_documents),
     nextAuditVersion: number(parent.audit_version, 1) + 1,
     parentAuditId: parent.id,
-    pedimentoData: parent.pedimento_data ?? {},
+    pedimentoData: {
+      operation_code: parent.operation_code,
+      pedimento_number: parent.pedimento_number,
+      ...(parent.pedimento_data ?? {}),
+    },
   };
 }
 
