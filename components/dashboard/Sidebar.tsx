@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import type { MenuSection } from "@/components/dashboard/types";
+import { UserProfileChip } from "@/components/dashboard/UserProfileChip";
 import type { UserProfile } from "@/lib/auth/types";
 
 type SidebarProps = {
@@ -62,11 +63,14 @@ export function Sidebar({ currentPath, menuSections, userContext, userEmail }: S
       <div className="border-t border-slate-200 p-4">
         {userContext ? (
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <p className="text-sm font-semibold text-slate-900">{userContext.fullName}</p>
-            <p className="mt-1 break-words text-xs text-slate-500">{userEmail}</p>
+            <UserProfileChip
+              className="border-none bg-transparent px-0 py-0 shadow-none"
+              email={userEmail}
+              fullName={userContext.fullName}
+              role={userContext.role}
+            />
             <div className="mt-3 space-y-1 text-xs text-slate-600">
               <p>{userContext.companyName}</p>
-              <p className="font-semibold uppercase tracking-[0.14em] text-emerald-700">{userContext.role}</p>
             </div>
             <form action="/api/auth/logout" className="mt-4" method="post">
               <button className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" type="submit">

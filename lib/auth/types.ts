@@ -8,7 +8,7 @@ export type AuthUser = {
 export type UserProfile = {
   companyId: string;
   companyName: string;
-  fullName: string;
+  fullName: string | null;
   role: UserRole;
   userId: string;
 };

@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { cache } from "react";
 
 import type { AuditEngineCode, UserRole } from "@/components/dashboard/types";
 import { ACCESS_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE } from "@/lib/auth/cookies";
@@ -121,7 +122,7 @@ export async function signInWithPasswordDetailed(email: string, password: string
   };
 }
 
-export async function getAuthContext(): Promise<AuthContext | null> {
+const getAuthContextCached = cache(async (): Promise<AuthContext | null> => {
   const cookieStore = await cookies();
   const accessToken = cookieStore.get(ACCESS_TOKEN_COOKIE)?.value;
 
@@ -144,6 +145,10 @@ export async function getAuthContext(): Promise<AuthContext | null> {
     profile,
     user,
   };
+});
+
+export async function getAuthContext(): Promise<AuthContext | null> {
+  return getAuthContextCached();
 }
 
 export function userCanReadEngine(context: AuthContext | null, engineCode: AuditEngineCode) {
@@ -291,7 +296,7 @@ async function getUserProfile(accessToken: string, userId: string): Promise<User
   return {
     companyId: row.company_id,
     companyName: companyRows[0]?.name ?? "Empresa sin nombre",
-    fullName: row.full_name ?? "Usuario",
+    fullName: row.full_name?.trim() || null,
     role: row.role,
     userId: row.user_id,
   };
