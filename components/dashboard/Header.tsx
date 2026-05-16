@@ -35,6 +35,7 @@ export async function Header({
                 className="w-full justify-start border-slate-200 bg-slate-50/90 lg:max-w-sm"
                 email={auth?.user.email}
                 fullName={auth?.profile?.fullName}
+                interactive
                 role={auth?.profile?.role}
               />
             ) : null}
