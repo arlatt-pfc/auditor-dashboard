@@ -86,7 +86,7 @@ export async function POST(request: Request) {
     return loginError("ENGINE_ACCESS_NOT_FOUND", "Login correcto, pero el usuario no tiene engines asignados o RLS bloqueo user_engine_access.", "profile_rbac", 403);
   }
 
-  const response = NextResponse.json({ redirectTo: "/dashboard/customs-compliance" });
+  const response = NextResponse.json({ redirectTo: "/dashboard" });
   const secure = process.env.NODE_ENV === "production";
   const maxAge = session.expires_in ?? 3600;
 

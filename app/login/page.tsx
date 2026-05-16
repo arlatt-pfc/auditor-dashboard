@@ -7,7 +7,7 @@ export default async function LoginPage() {
   const auth = await getAuthContext();
 
   if (auth) {
-    redirect("/dashboard/customs-compliance");
+    redirect("/dashboard");
   }
 
   return (

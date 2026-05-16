@@ -42,7 +42,7 @@ export function LoginForm() {
     }
 
     const payload = (await response.json()) as { redirectTo?: string };
-    router.replace(payload.redirectTo ?? "/dashboard/customs-compliance");
+    router.replace(payload.redirectTo ?? "/dashboard");
     router.refresh();
   }
 
